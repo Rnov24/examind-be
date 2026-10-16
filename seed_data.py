@@ -23,21 +23,12 @@ def seed_database():
     print("=" * 60)
 
     try:
-        # Ensure database 'examind' exists
-        import pymysql
-        conn = pymysql.connect(host="localhost", user="root", port=3306)
-        with conn.cursor() as cur:
-            cur.execute("CREATE DATABASE IF NOT EXISTS examind CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;")
-        conn.commit()
-        conn.close()
-
         # Create all tables if not exist
         print("1. Creating database tables...")
         Base.metadata.create_all(bind=engine)
         print("   -> Tables verified / created successfully.")
     except Exception as e:
         print(f"   [!] Database connection failed: {e}")
-        print("   Pastikan MySQL di XAMPP telah dinyalakan pada port 3306.")
         return False
 
     db: Session = SessionLocal()

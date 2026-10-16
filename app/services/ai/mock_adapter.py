@@ -157,6 +157,20 @@ class MockAIService(AIServiceInterface):
                 ideal = f"Analisis harus mencakup identifikasi akar masalah terkait {topic_clean}, elaborasi alternatif solusi terstruktur dengan argumen logis yang kuat, serta evaluasi kelebihan dan keterbatasan dari masing-masing pendekatan."
 
             rubric = generate_4d_rubric(p, subject)
+            ref_pts = [
+                {
+                    "id": "p1",
+                    "statement": f"Konsep esensial dan definisi mekanisme {topic_clean}",
+                    "weight": 0.5,
+                },
+                {
+                    "id": "p2",
+                    "statement": f"Alur penalaran logis, terminologi tepat, dan contoh konkret {topic_clean}",
+                    "weight": 0.5,
+                },
+            ]
+            rubric["ref_points"] = ref_pts
+
             essays.append(
                 GeneratedQuestionEssay(
                     prompt=p,
@@ -164,7 +178,7 @@ class MockAIService(AIServiceInterface):
                     bloom_level="C4" if j == 1 else "C5",
                     rubric=rubric,
                     ideal_answer=ideal,
-                    explanation=f"Penilaian esai {topic_clean} menitikberatkan pada ketepatan konsep (40%), alur penalaran (30%), terminologi (15%), dan kerapian struktur bahasa (15%).",
+                    explanation=f"Penilaian esai {topic_clean} menitikberatkan pada ketepatan konsep (50%) dan penalaran kontekstual (50%).",
                     points=20.0,
                 )
             )
@@ -174,7 +188,46 @@ class MockAIService(AIServiceInterface):
     def grade_essay(
         self, prompt: str, rubric: Dict[str, Any], ideal_answer: str, student_answer: str
     ) -> Dict[str, Any]:
-        """Evaluates student essay against 4D rubric with confidence score."""
+        """Evaluates student essay using respan/span-01-lite if available, or heuristic fallback."""
+        try:
+            from app.services.ai.respan_grader import get_respan_grader
+            respan_grader = get_respan_grader()
+            if respan_grader.is_configured():
+                res = respan_grader.grade_short_answer(
+                    prompt=prompt,
+                    rubric=rubric,
+                    ideal_answer=ideal_answer,
+                    student_answer=student_answer,
+                )
+                if res and "total_score" in res:
+                    evals = res.get("rationale_json", {}).get("evaluations", [])
+                    dim_scores = {}
+                    for idx, ev in enumerate(evals, 1):
+                        dim_scores[f"kriteria_{idx}"] = round(ev.get("noul", 0.0) * 100, 1)
+
+                    passed = [ev["statement"] for ev in evals if ev.get("status") == "passed"]
+                    missed = [ev["statement"] for ev in evals if ev.get("status") != "passed"]
+                    feedback_parts = []
+                    if passed:
+                        feedback_parts.append(f"Poin yang sudah baik: {', '.join(passed)}.")
+                    if missed:
+                        feedback_parts.append(f"Perlu dilengkapi: {', '.join(missed)}.")
+                    if res.get("rationale_json", {}).get("misconception_detected"):
+                        feedback_parts.append("Perhatikan kembali konsep dasar agar tidak tertukar.")
+
+                    student_explanation = " ".join(feedback_parts) or "Jawaban telah dinilai secara objektif sesuai rubrik."
+
+                    return {
+                        "total_score": res["total_score"],
+                        "dimension_scores": dim_scores or {"konsep": res["total_score"]},
+                        "confidence_level": res["confidence_level"],
+                        "rationale": json.dumps(res.get("rationale_json", {})),
+                        "explanation": student_explanation,
+                        "decision_model": res.get("model", "respan/span-01-lite"),
+                    }
+        except Exception as exc:
+            pass
+
         if not student_answer or len(student_answer.strip()) < 10:
             return {
                 "total_score": 0.0,

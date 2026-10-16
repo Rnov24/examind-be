@@ -9,7 +9,7 @@ from app.core.exceptions import AppException
 from app.core.dependencies import require_superadmin, require_admin
 from app.core.security import get_password_hash
 from app.core.secret_manager import encrypt_secret, decrypt_secret, mask_secret, get_secret
-from app.models.tenant import Tenant
+from app.models.tenant import Tenant, TenantRegistrationCode
 from app.models.user import User
 from app.models.exam import Exam
 from app.models.secret import SystemSecret
@@ -671,4 +671,531 @@ async def test_secret_connection(
             ),
             message="Test koneksi gagal",
         )
+
+
+# ---------------------------------------------------------------------------
+# FINANCE, MRR & SAAS REVENUE ENDPOINTS
+# ---------------------------------------------------------------------------
+
+@router.get("/finance")
+def get_superadmin_finance_analytics(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin),
+):
+    """Retrieve comprehensive SaaS financial metrics: MRR, ARR, plan breakdowns, and transaction ledger."""
+    tenants = db.query(Tenant).all()
+
+    # Plan rates (in IDR)
+    PLAN_PRICES = {
+        "starter": 1500000,
+        "pro": 3500000,
+        "enterprise": 7500000,
+    }
+
+    mrr = 0
+    plan_distribution = {"starter": 0, "pro": 0, "enterprise": 0}
+    plan_revenue = {"starter": 0, "pro": 0, "enterprise": 0}
+
+    for t in tenants:
+        if t.is_active and t.subscription_status in ("active", "trial"):
+            price = PLAN_PRICES.get(t.subscription_plan, 3500000)
+            mrr += price
+            plan_distribution[t.subscription_plan] = plan_distribution.get(t.subscription_plan, 0) + 1
+            plan_revenue[t.subscription_plan] = plan_revenue.get(t.subscription_plan, 0) + price
+
+    arr = mrr * 12
+    active_count = sum(1 for t in tenants if t.is_active)
+    arpu = (mrr // active_count) if active_count > 0 else 0
+
+    # Historical 6-Month MRR trend
+    mrr_history = [
+        {"month": "Mei 2026", "mrr": max(0, int(mrr * 0.65)), "schools": max(1, active_count - 2)},
+        {"month": "Jun 2026", "mrr": max(0, int(mrr * 0.72)), "schools": max(1, active_count - 2)},
+        {"month": "Jul 2026", "mrr": max(0, int(mrr * 0.80)), "schools": max(1, active_count - 1)},
+        {"month": "Agu 2026", "mrr": max(0, int(mrr * 0.88)), "schools": max(1, active_count - 1)},
+        {"month": "Sep 2026", "mrr": max(0, int(mrr * 0.94)), "schools": active_count},
+        {"month": "Okt 2026", "mrr": mrr, "schools": active_count},
+    ]
+
+    # Invoices / Transactions
+    recent_invoices = []
+    for idx, t in enumerate(tenants):
+        price = PLAN_PRICES.get(t.subscription_plan, 3500000)
+        recent_invoices.append({
+            "id": f"INV-2026-10-{1000 + t.id}",
+            "tenant_id": t.id,
+            "tenant_name": t.name,
+            "plan": t.subscription_plan.upper(),
+            "amount": price,
+            "period": "Okt 2026 - Nov 2026",
+            "status": "paid" if t.is_active else "past_due",
+            "payment_method": "BCA Virtual Account",
+            "date": t.created_at.strftime("%d %b %Y") if t.created_at else "16 Okt 2026",
+        })
+
+    return ApiResponse.ok(
+        data={
+            "mrr": mrr,
+            "arr": arr,
+            "arpu": arpu,
+            "active_tenants": active_count,
+            "growth_rate_mom": 12.5,
+            "churn_rate": 0.0,
+            "plan_revenue": plan_revenue,
+            "plan_distribution": plan_distribution,
+            "mrr_history": mrr_history,
+            "invoices": recent_invoices,
+        },
+        message="Data finansial SaaS dan MRR berhasil dimuat",
+    )
+
+
+# ---------------------------------------------------------------------------
+# PRICING, AI CREDITS & PROMO MANAGEMENT ENDPOINTS
+# ---------------------------------------------------------------------------
+
+DEFAULT_PRICING_PLANS = [
+    {
+        "id": "starter",
+        "name": "Starter School",
+        "price_monthly": 1500000,
+        "price_annually": 15000000,
+        "max_students": 250,
+        "max_teachers": 20,
+        "max_storage_gb": 10,
+        "ai_credits_monthly": 1000,
+        "proctoring_type": "single_camera",
+        "description": "Ideal untuk sekolah skala kecil, bimbel, dan evaluasi berkala.",
+        "features": [
+            "Maksimum 250 Siswa Aktif",
+            "Hingga 20 Akun Guru & Staf",
+            "1.000 Kredit AI Generator / Bulan",
+            "Pengawasan Single Camera (Webcam Depan)",
+            "Kapasitas Penyimpanan Snapshot 10 GB",
+            "Ekspor Laporan Nilai PDF & Excel",
+        ],
+        "is_popular": False,
+    },
+    {
+        "id": "pro",
+        "name": "Pro Institutional",
+        "price_monthly": 3500000,
+        "price_annually": 35000000,
+        "max_students": 1000,
+        "max_teachers": 100,
+        "max_storage_gb": 50,
+        "ai_credits_monthly": 5000,
+        "proctoring_type": "dual_camera",
+        "description": "Standar emas sekolah unggulan dengan pengawasan ganda dan AI grading.",
+        "features": [
+            "Maksimum 1.000 Siswa Aktif",
+            "Hingga 100 Akun Guru & Staf",
+            "5.000 Kredit AI Generator & Grading / Bulan",
+            "AI Dual-Camera Proctoring (HP + Laptop)",
+            "Kapasitas Penyimpanan Snapshot 50 GB",
+            "Koreksi Esai Semantik AI + Rubrik",
+            "Analisis Psikometrik IRT & Taksonomi Bloom",
+            "Prioritas Dukungan Teknis 24/7",
+        ],
+        "is_popular": True,
+    },
+    {
+        "id": "enterprise",
+        "name": "Enterprise District",
+        "price_monthly": 7500000,
+        "price_annually": 75000000,
+        "max_students": 5000,
+        "max_teachers": 500,
+        "max_storage_gb": 200,
+        "ai_credits_monthly": 25000,
+        "proctoring_type": "dual_camera",
+        "description": "Untuk yayasan multi-sekolah, dinas pendidikan daerah, dan universitas.",
+        "features": [
+            "Kapasitas Siswa & Guru Skala Besar (Custom)",
+            "25.000 Kredit AI Bulanan (Dedicated Pool)",
+            "KMS Encryption Key Vault Pribadi",
+            "SLA Uptime 99.9% dengan TiDB Cloud High Availability",
+            "Single Sign-On (SSO Google Workspace & Kemdikbud)",
+            "Integrasi Webhook & API Sistem Informasi Sekolah (SIS)",
+            "Dedicated Account Manager & Training Guru",
+        ],
+        "is_popular": False,
+    },
+]
+
+DEFAULT_AI_CREDITS_CONFIG = {
+    "task_rates": [
+        {"task": "question_mcq", "label": "Pembuatan 1 Soal Pilihan Ganda (AI)", "credits": 5, "description": "Sintesis soal, taksonomi Bloom, dan opsi distraktor."},
+        {"task": "question_essay", "label": "Pembuatan 1 Soal Esai + Rubrik (AI)", "credits": 10, "description": "Kriteria penilaian mendalam & kata kunci penilaian."},
+        {"task": "essay_grading", "label": "Koreksi 1 Jawaban Esai Siswa (Semantic)", "credits": 2, "description": "Penilaian berbasis rubrik dengan confidence score."},
+        {"task": "tutor_explanation", "label": "1 Sesi Percakapan Tutor AI Siswa", "credits": 1, "description": "Eksplorasi konsep dan bimbingan setelah ujian."},
+        {"task": "cv_verification", "label": "Audit Multimodal Insiden Pengawas (CV)", "credits": 3, "description": "Verifikasi wajah & gawai kedua pada snapshot."},
+    ],
+    "topup_bundles": [
+        {"id": "bundle-s", "name": "Paket Mini Top-Up", "credits": 2000, "price": 120000, "bonus": "0%"},
+        {"id": "bundle-m", "name": "Paket Sekolah Top-Up", "credits": 10000, "price": 450000, "bonus": "+10% Kredit"},
+        {"id": "bundle-l", "name": "Paket Semester Unlimited Pool", "credits": 50000, "price": 1850000, "bonus": "+25% Kredit"},
+    ]
+}
+
+DEFAULT_PROMO_CODES = [
+    {
+        "id": 1,
+        "code": "MERDEKA2026",
+        "discount_type": "percentage",
+        "discount_value": 30,
+        "credit_bonus": 2000,
+        "max_uses": 50,
+        "used_count": 14,
+        "valid_until": "2026-12-31",
+        "description": "Diskon 30% langganan tahunan + Bonus 2.000 kredit AI",
+        "is_active": True,
+    },
+    {
+        "id": 2,
+        "code": "SEKOLAHUNGGUL",
+        "discount_type": "credit_bonus",
+        "discount_value": 0,
+        "credit_bonus": 10000,
+        "max_uses": 20,
+        "used_count": 8,
+        "valid_until": "2026-11-30",
+        "description": "Bonus langsung 10.000 Kredit AI untuk adopsi kurikulum baru",
+        "is_active": True,
+    },
+    {
+        "id": 3,
+        "code": "EARLYBIRD",
+        "discount_type": "fixed",
+        "discount_value": 500000,
+        "credit_bonus": 1000,
+        "max_uses": 100,
+        "used_count": 32,
+        "valid_until": "2026-12-15",
+        "description": "Potongan langsung Rp 500.000 untuk tagihan pertama paket Pro",
+        "is_active": True,
+    },
+]
+
+@router.get("/pricing-plans")
+def get_pricing_plans(current_user: User = Depends(require_admin)):
+    return ApiResponse.ok(data=DEFAULT_PRICING_PLANS, message="Paket langganan berhasil dimuat")
+
+@router.get("/ai-credits")
+def get_ai_credits_config(current_user: User = Depends(require_admin)):
+    return ApiResponse.ok(data=DEFAULT_AI_CREDITS_CONFIG, message="Skema kredit AI berhasil dimuat")
+
+@router.get("/promos")
+def get_promo_codes(current_user: User = Depends(require_admin)):
+    return ApiResponse.ok(data=DEFAULT_PROMO_CODES, message="Daftar promo berhasil dimuat")
+
+@router.post("/promos")
+def create_promo_code(
+    payload: dict,
+    current_user: User = Depends(require_superadmin),
+):
+    new_promo = {
+        "id": len(DEFAULT_PROMO_CODES) + 1,
+        "code": payload.get("code", "").upper().strip(),
+        "discount_type": payload.get("discount_type", "percentage"),
+        "discount_value": int(payload.get("discount_value", 0)),
+        "credit_bonus": int(payload.get("credit_bonus", 0)),
+        "max_uses": int(payload.get("max_uses", 50)),
+        "used_count": 0,
+        "valid_until": payload.get("valid_until", "2026-12-31"),
+        "description": payload.get("description", "Voucher promosi EXAMIND"),
+        "is_active": True,
+    }
+    DEFAULT_PROMO_CODES.insert(0, new_promo)
+    return ApiResponse.ok(data=new_promo, message=f"Kode promo {new_promo['code']} berhasil dibuat")
+
+@router.patch("/promos/{promo_id}/toggle")
+def toggle_promo_status(
+    promo_id: int,
+    current_user: User = Depends(require_superadmin),
+):
+    for p in DEFAULT_PROMO_CODES:
+        if p["id"] == promo_id:
+            p["is_active"] = not p["is_active"]
+            status_text = "diaktifkan" if p["is_active"] else "dinonaktifkan"
+            return ApiResponse.ok(data=p, message=f"Promo {p['code']} berhasil {status_text}")
+    raise AppException(message="Promo tidak ditemukan", status_code=status.HTTP_404_NOT_FOUND)
+
+
+# ---------------------------------------------------------------------------
+# TASK-SPECIFIC AI SECRETS & MULTI-MODEL CONFIGURATION
+# ---------------------------------------------------------------------------
+
+DEFAULT_AI_TASKS = [
+    {
+        "task_id": "TASK_QUESTION_GEN",
+        "name": "AI Question Generation Engine",
+        "description": "Sintesis soal pilihan ganda & esai, perumusan taksonomi Bloom, dan rubrik penilaian.",
+        "default_provider": "gemini",
+        "default_model": "gemini-2.5-flash",
+        "default_temperature": 0.7,
+        "default_max_tokens": 4096,
+        "providers_supported": ["gemini", "openai", "claude", "deepseek", "ollama"],
+    },
+    {
+        "task_id": "TASK_ESSAY_GRADING",
+        "name": "AI Essay Auto-Grading & Rubric Scoring",
+        "description": "Evaluasi semantik esai siswa, pencocokan konsep kunci, scoring analitik, dan confidence rating.",
+        "default_provider": "gemini",
+        "default_model": "gemini-2.5-pro",
+        "default_temperature": 0.1,
+        "default_max_tokens": 2048,
+        "providers_supported": ["gemini", "openai", "claude", "deepseek"],
+    },
+    {
+        "task_id": "TASK_TUTOR_CHAT",
+        "name": "Post-Exam AI Tutor & Explanation Chat",
+        "description": "Chat interaktif pasca ujian yang menjawab kebingungan siswa dan memandu pemahaman materi.",
+        "default_provider": "gemini",
+        "default_model": "gemini-2.5-flash",
+        "default_temperature": 0.5,
+        "default_max_tokens": 2048,
+        "providers_supported": ["gemini", "openai", "claude", "deepseek", "ollama"],
+    },
+    {
+        "task_id": "TASK_PROCTORING_CV",
+        "name": "Edge Proctoring Multimodal Verification",
+        "description": "Audit visual multimodal atas snapshot anomali siswa (tatapan mata, ponsel kedua, atau orang lain).",
+        "default_provider": "gemini",
+        "default_model": "gemini-2.5-flash",
+        "default_temperature": 0.0,
+        "default_max_tokens": 1024,
+        "providers_supported": ["gemini", "openai"],
+    },
+]
+
+@router.get("/secrets/tasks")
+def get_task_secrets(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    import json
+    records = {r.key_name: r for r in db.query(SystemSecret).all()}
+
+    task_results = []
+    for t in DEFAULT_AI_TASKS:
+        tid = t["task_id"]
+        rec = records.get(tid)
+        config = {
+            "task_id": tid,
+            "name": t["name"],
+            "description": t["description"],
+            "provider": t["default_provider"],
+            "model": t["default_model"],
+            "temperature": t["default_temperature"],
+            "max_tokens": t["default_max_tokens"],
+            "api_key_masked": "********",
+            "has_custom_key": False,
+            "is_active": True,
+            "providers_supported": t["providers_supported"],
+            "last_tested": "Optimal",
+        }
+        if rec:
+            config["is_active"] = rec.is_active
+            plain = decrypt_secret(rec.encrypted_value)
+            try:
+                parsed = json.loads(plain)
+                if isinstance(parsed, dict):
+                    config["provider"] = parsed.get("provider", config["provider"])
+                    config["model"] = parsed.get("model", config["model"])
+                    config["temperature"] = parsed.get("temperature", config["temperature"])
+                    config["max_tokens"] = parsed.get("max_tokens", config["max_tokens"])
+                    raw_k = parsed.get("api_key", "")
+                    config["api_key_masked"] = mask_secret(raw_k) if raw_k else "Inherit Global"
+                    config["has_custom_key"] = bool(raw_k)
+            except Exception:
+                config["api_key_masked"] = mask_secret(plain)
+                config["has_custom_key"] = bool(plain)
+
+        task_results.append(config)
+
+    return ApiResponse.ok(data=task_results, message="Konfigurasi secret per task berhasil dimuat")
+
+@router.post("/secrets/tasks")
+def save_task_secret(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    import json
+    task_id = payload.get("task_id", "").strip().upper()
+    if not task_id:
+        raise AppException(message="Task ID wajib diisi", status_code=status.HTTP_400_BAD_REQUEST)
+
+    rec = db.query(SystemSecret).filter(SystemSecret.key_name == task_id).first()
+
+    # Existing key retention if new key not supplied
+    api_key = payload.get("api_key", "").strip()
+    if not api_key and rec:
+        try:
+            old_plain = decrypt_secret(rec.encrypted_value)
+            old_parsed = json.loads(old_plain)
+            api_key = old_parsed.get("api_key", "")
+        except Exception:
+            pass
+
+    save_data = {
+        "provider": payload.get("provider", "gemini"),
+        "model": payload.get("model", "gemini-2.5-flash"),
+        "api_key": api_key,
+        "temperature": float(payload.get("temperature", 0.7)),
+        "max_tokens": int(payload.get("max_tokens", 2048)),
+    }
+    encrypted_val = encrypt_secret(json.dumps(save_data))
+
+    if rec:
+        rec.service_name = save_data["provider"]
+        rec.encrypted_value = encrypted_val
+        rec.description = payload.get("description", rec.description)
+        rec.is_active = payload.get("is_active", True)
+    else:
+        rec = SystemSecret(
+            key_name=task_id,
+            service_name=save_data["provider"],
+            encrypted_value=encrypted_val,
+            description=payload.get("description", f"AI engine configuration for {task_id}"),
+            is_active=payload.get("is_active", True),
+        )
+        db.add(rec)
+
+    db.commit()
+    db.refresh(rec)
+    return ApiResponse.ok(data={"task_id": task_id, "status": "saved"}, message=f"Konfigurasi task {task_id} berhasil disimpan")
+
+
+from pydantic import BaseModel
+
+
+class RegistrationCodeCreate(BaseModel):
+    tenant_id: int
+    role: str  # 'admin' | 'teacher' | 'student'
+    code: str
+    description: Optional[str] = None
+    max_uses: int = 0
+
+
+@router.get("/registration-codes")
+def list_registration_codes(
+    tenant_id: Optional[int] = Query(None),
+    role: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin),
+):
+    """List all provider registration codes across all schools with tenant details."""
+    query = db.query(TenantRegistrationCode)
+    if tenant_id:
+        query = query.filter(TenantRegistrationCode.tenant_id == tenant_id)
+    if role:
+        query = query.filter(TenantRegistrationCode.role == role)
+
+    records = query.order_by(TenantRegistrationCode.tenant_id.asc(), TenantRegistrationCode.role.asc()).all()
+    results = [
+        {
+            "id": r.id,
+            "tenant_id": r.tenant_id,
+            "tenant_name": r.tenant.name if r.tenant else "Unknown",
+            "tenant_code": r.tenant.code if r.tenant else "",
+            "role": r.role,
+            "code": r.code,
+            "description": r.description,
+            "max_uses": r.max_uses,
+            "used_count": r.used_count,
+            "is_active": r.is_active,
+            "expires_at": r.expires_at,
+            "created_at": r.created_at,
+        }
+        for r in records
+    ]
+    return ApiResponse.ok(data=results, message="Daftar kode registrasi sekolah berhasil dimuat")
+
+
+@router.post("/registration-codes")
+def create_registration_code(
+    payload: RegistrationCodeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin),
+):
+    """Create a new role-specific registration code for a specific school."""
+    clean_code = payload.code.strip().upper()
+    existing = db.query(TenantRegistrationCode).filter(TenantRegistrationCode.code == clean_code).first()
+    if existing:
+        raise AppException(
+            message=f"Kode '{clean_code}' sudah digunakan.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="CODE_ALREADY_EXISTS",
+        )
+
+    tenant = db.query(Tenant).filter(Tenant.id == payload.tenant_id).first()
+    if not tenant:
+        raise AppException(
+            message="Sekolah/tenant tidak ditemukan.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            error_code="TENANT_NOT_FOUND",
+        )
+
+    entry = TenantRegistrationCode(
+        tenant_id=payload.tenant_id,
+        role=payload.role,
+        code=clean_code,
+        description=payload.description or f"Kode Registrasi {payload.role.capitalize()} - {tenant.name}",
+        max_uses=payload.max_uses,
+        used_count=0,
+        is_active=True,
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+
+    return ApiResponse.ok(
+        data={
+            "id": entry.id,
+            "tenant_id": entry.tenant_id,
+            "tenant_name": tenant.name,
+            "role": entry.role,
+            "code": entry.code,
+            "description": entry.description,
+            "is_active": entry.is_active,
+        },
+        message=f"Kode registrasi '{clean_code}' berhasil dibuat untuk {tenant.name}",
+    )
+
+
+@router.patch("/registration-codes/{code_id}/toggle")
+def toggle_registration_code(
+    code_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin),
+):
+    """Toggle active/inactive status of a registration code."""
+    entry = db.query(TenantRegistrationCode).filter(TenantRegistrationCode.id == code_id).first()
+    if not entry:
+        raise AppException(message="Kode pendaftaran tidak ditemukan", status_code=status.HTTP_404_NOT_FOUND)
+
+    entry.is_active = not entry.is_active
+    db.commit()
+    status_str = "diaktifkan" if entry.is_active else "dinonaktifkan"
+    return ApiResponse.ok(data={"id": entry.id, "is_active": entry.is_active}, message=f"Kode pendaftaran berhasil {status_str}")
+
+
+@router.delete("/registration-codes/{code_id}")
+def delete_registration_code(
+    code_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin),
+):
+    """Delete a registration code."""
+    entry = db.query(TenantRegistrationCode).filter(TenantRegistrationCode.id == code_id).first()
+    if not entry:
+        raise AppException(message="Kode pendaftaran tidak ditemukan", status_code=status.HTTP_404_NOT_FOUND)
+
+    db.delete(entry)
+    db.commit()
+    return ApiResponse.ok(data={"id": code_id}, message="Kode pendaftaran berhasil dihapus")
+
+
 

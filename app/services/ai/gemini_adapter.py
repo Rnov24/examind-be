@@ -151,12 +151,16 @@ class GeminiAdapter(AIServiceInterface):
             "  ],\n"
             '  "essay_questions": [\n'
             '    {\n'
-            '      "prompt": "...",\n'
-            '      "difficulty": "hard",\n'
-            '      "bloom_level": "C4",\n'
-            '      "rubric": {"dimension_1_concept": 40, "dimension_2_argument": 30, "dimension_3_terminology": 15, "dimension_4_clarity": 15},\n'
-            '      "sample_answer": "...",\n'
-            '      "points": 20.0\n'
+            '      "prompt": "teks pertanyaan esai/short answer",\n'
+            '      "difficulty": "medium",\n'
+            '      "bloom_level": "C3",\n'
+            '      "sample_answer": "Jawaban acuan ringkas 1-2 kalimat",\n'
+            '      "ref_points": [\n'
+            '        {"id": "p1", "statement": "Kriteria/konsep kunci 1 yang harus ada", "weight": 0.5},\n'
+            '        {"id": "p2", "statement": "Kriteria/konsep kunci 2 yang harus ada", "weight": 0.5}\n'
+            '      ],\n'
+            '      "rubric": {"dimension_1_concept": 50, "dimension_2_argument": 50},\n'
+            '      "points": 10.0\n'
             "    }\n"
             "  ]\n"
             "}"
@@ -197,13 +201,19 @@ class GeminiAdapter(AIServiceInterface):
 
                 essay_list = []
                 for q in parsed.get("essay_questions", []):
+                    rubric_dict = q.get("rubric", {})
+                    ref_pts = q.get("ref_points")
+                    if ref_pts:
+                        rubric_dict["ref_points"] = ref_pts
+
                     essay_list.append(
                         GeneratedQuestionEssay(
                             prompt=q["prompt"],
                             difficulty=q.get("difficulty", request.difficulty),
                             bloom_level=q.get("bloom_level", "C4"),
-                            rubric=q.get("rubric", {}),
-                            sample_answer=q.get("sample_answer", ""),
+                            rubric=rubric_dict,
+                            ideal_answer=q.get("sample_answer") or q.get("ideal_answer", ""),
+                            explanation=q.get("explanation", ""),
                             points=float(q.get("points", 20.0)),
                         )
                     )
@@ -219,6 +229,47 @@ class GeminiAdapter(AIServiceInterface):
     def grade_essay(
         self, prompt: str, rubric: Dict[str, Any], ideal_answer: str, student_answer: str
     ) -> Dict[str, Any]:
+        # 1. High-Efficiency Respan Span-01 Lite Decision Model
+        try:
+            from app.services.ai.respan_grader import get_respan_grader
+            respan_grader = get_respan_grader()
+            if respan_grader.is_configured():
+                res = respan_grader.grade_short_answer(
+                    prompt=prompt,
+                    rubric=rubric,
+                    ideal_answer=ideal_answer,
+                    student_answer=student_answer,
+                )
+                if res and "total_score" in res:
+                    evals = res.get("rationale_json", {}).get("evaluations", [])
+                    dim_scores = {}
+                    for idx, ev in enumerate(evals, 1):
+                        dim_scores[f"kriteria_{idx}"] = round(ev.get("noul", 0.0) * 100, 1)
+
+                    passed = [ev["statement"] for ev in evals if ev.get("status") == "passed"]
+                    missed = [ev["statement"] for ev in evals if ev.get("status") != "passed"]
+                    feedback_parts = []
+                    if passed:
+                        feedback_parts.append(f"Poin yang sudah baik: {', '.join(passed)}.")
+                    if missed:
+                        feedback_parts.append(f"Perlu dilengkapi: {', '.join(missed)}.")
+                    if res.get("rationale_json", {}).get("misconception_detected"):
+                        feedback_parts.append("Perhatikan kembali konsep dasar agar tidak tertukar.")
+
+                    student_explanation = " ".join(feedback_parts) or "Jawaban telah dinilai secara objektif sesuai rubrik."
+
+                    return {
+                        "total_score": res["total_score"],
+                        "dimension_scores": dim_scores or {"konsep": res["total_score"]},
+                        "confidence_level": res["confidence_level"],
+                        "rationale": json.dumps(res.get("rationale_json", {})),
+                        "explanation": student_explanation,
+                        "raw_rationale": res.get("rationale"),
+                        "decision_model": res.get("model", "respan/span-01-lite"),
+                    }
+        except Exception as respan_err:
+            logger.warning(f"[GeminiAdapter] Respan evaluation exception: {respan_err}")
+
         system_prompt = (
             "Anda adalah asisten pengoreksi ujian akademik yang objektif dan adil. "
             "Evaluasi jawaban esai siswa berdasarkan rubrik 4 dimensi (Konsep maks 40, Argumen maks 30, Terminologi maks 15, Kejelasan maks 15). "
@@ -389,8 +440,24 @@ class GeminiAdapter(AIServiceInterface):
             detail_lines.append(f"Pembahasan Resmi Soal: {question_context.get('explanation')}")
         if question_context.get("sample_answer"):
             detail_lines.append(f"Contoh Jawaban Ideal Esai: {question_context.get('sample_answer')}")
-        if question_context.get("ai_grading_rationale"):
-            detail_lines.append(f"Catatan Evaluasi AI: {question_context.get('ai_grading_rationale')}")
+        rationale_raw = question_context.get("ai_grading_rationale")
+        if rationale_raw:
+            try:
+                parsed_rationale = json.loads(rationale_raw) if isinstance(rationale_raw, str) else rationale_raw
+                if isinstance(parsed_rationale, dict) and "evaluations" in parsed_rationale:
+                    detail_lines.append("\n=== DIAGNOSIS KOREKSI DECISION ENGINE (RESPAN SPAN-01 LITE) ===")
+                    detail_lines.append(f"Model Penilai: {parsed_rationale.get('model', 'respan/span-01-lite')}")
+                    for ev in parsed_rationale.get("evaluations", []):
+                        status_str = "TERPENUHI (Sudah Benar)" if ev.get("status") == "passed" else "BELUM TERPENUHI (Terlewat / Kurang)"
+                        detail_lines.append(f"- Kriteria: '{ev.get('statement')}' -> {status_str} (Tingkat Pemenuhan: {int(ev.get('noul', 0)*100)}%)")
+                    if parsed_rationale.get("misconception_detected"):
+                        detail_lines.append(f"- PERINGATAN MISKONSEPSI: Terdeteksi konsep terbalik atau kekeliruan fatal ({int(parsed_rationale.get('misconception_score', 0)*100)}%). Luruskan poin ini kepada siswa!")
+                    else:
+                        detail_lines.append("- Integritas Konsep: Tidak ada miskonsepsi fatal.")
+                else:
+                    detail_lines.append(f"Catatan Evaluasi AI: {rationale_raw}")
+            except Exception:
+                detail_lines.append(f"Catatan Evaluasi AI: {rationale_raw}")
 
         full_system_instruction = f"{system_prompt}\n\n" + "\n".join(detail_lines)
 

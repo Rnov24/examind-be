@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, Enum, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, Enum, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 
@@ -32,3 +32,24 @@ class Tenant(Base):
 
     # Relationships
     users = relationship("User", back_populates="tenant", cascade="all, delete-orphan")
+    registration_codes = relationship("TenantRegistrationCode", back_populates="tenant", cascade="all, delete-orphan")
+
+
+class TenantRegistrationCode(Base):
+    __tablename__ = "tenant_registration_codes"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(Enum("admin", "teacher", "student", name="registration_code_roles"), nullable=False, index=True)
+    code = Column(String(50), unique=True, nullable=False, index=True)
+    description = Column(String(255), nullable=True)
+    max_uses = Column(Integer, default=0, nullable=False)  # 0 = unlimited
+    used_count = Column(Integer, default=0, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    # Relationships
+    tenant = relationship("Tenant", back_populates="registration_codes")
+

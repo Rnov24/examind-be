@@ -65,7 +65,7 @@ async def extract_and_generate(
 
 
 from pydantic import BaseModel, Field
-from typing import List, Dict
+from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.dependencies import get_current_active_user
@@ -194,4 +194,42 @@ def chat_question_explanation(
         ),
         message="Penjelasan tutor AI untuk butir soal berhasil didapatkan",
     )
+
+
+class DecisionGradePreviewRequest(BaseModel):
+    prompt: str = Field(..., description="Pertanyaan soal")
+    student_answer: str = Field(..., description="Jawaban siswa yang akan dinilai")
+    ideal_answer: Optional[str] = Field(None, description="Kunci jawaban atau acuan ideal")
+    ref_points: Optional[List[Dict[str, Any]]] = Field(None, description="Daftar kriteria acuan atomik")
+    allocated_points: float = Field(10.0, description="Bobot poin maksimal butir soal")
+    api_key: Optional[str] = Field(None, description="OpenRouter API Key opsional")
+
+
+DecisionGradePreviewRequest.model_rebuild()
+
+
+@router.post("/decisions/grade-preview")
+def preview_decision_grading(
+    request: DecisionGradePreviewRequest,
+    current_user: User = Depends(get_current_active_user),
+):
+    from app.services.ai.respan_grader import get_respan_grader
+
+    grader = get_respan_grader()
+    rubric = {"ref_points": request.ref_points} if request.ref_points else {}
+
+    res = grader.grade_short_answer(
+        prompt=request.prompt,
+        rubric=rubric,
+        ideal_answer=request.ideal_answer or "",
+        student_answer=request.student_answer,
+        allocated_points=request.allocated_points,
+        custom_key=request.api_key,
+    )
+
+    return ApiResponse.ok(
+        data=res,
+        message="Evaluasi Respan Span-01 Lite berhasil diproses (Output: 0 tokens)",
+    )
+
 

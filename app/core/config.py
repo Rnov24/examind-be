@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     HOST: str = "0.0.0.0"
     PORT: int = 8000
+    FRONTEND_URL: str = "http://localhost:3000"
 
     # CORS
     CORS_ORIGINS: Union[List[str], str] = [
@@ -33,6 +34,10 @@ class Settings(BaseSettings):
     AI_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash"
+
+    # OpenRouter & Decision Models (Respan Span-01 Lite)
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_DECISION_MODEL: str = "respan/span-01-lite"
 
     # Resend Email Integration
     RESEND_API_KEY: str = ""

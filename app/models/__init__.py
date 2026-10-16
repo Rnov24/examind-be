@@ -1,5 +1,5 @@
 from app.core.database import Base
-from app.models.tenant import Tenant
+from app.models.tenant import Tenant, TenantRegistrationCode
 from app.models.user import User
 from app.models.academic import Class, ClassMember
 from app.models.question import QuestionBank, Question
@@ -12,6 +12,7 @@ from app.models.secret import SystemSecret
 __all__ = [
     "Base",
     "Tenant",
+    "TenantRegistrationCode",
     "User",
     "Class",
     "ClassMember",
