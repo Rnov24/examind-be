@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
@@ -9,7 +9,7 @@ from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import settings
-from app.core.rate_limit import limiter
+from app.core.rate_limit import limiter, get_client_ip
 from app.core.exceptions import (
     AppException,
     app_exception_handler,
@@ -78,6 +78,19 @@ def health_check():
         "service": "EXAMIND Backend API",
         "version": "1.0.1",
         "environment": settings.ENVIRONMENT,
+    }
+
+
+@app.get("/debug/ratelimit", include_in_schema=False)
+@limiter.limit("3/minute")
+def debug_ratelimit(request: Request):
+    from app.api.v1.endpoints import auth as auth_module
+
+    return {
+        "client_host": request.client.host if request.client else None,
+        "xff": request.headers.get("x-forwarded-for"),
+        "key_used": get_client_ip(request),
+        "login_is_wrapped": hasattr(auth_module.login, "__wrapped__"),
     }
 
 
