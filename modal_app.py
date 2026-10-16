@@ -23,6 +23,7 @@ import modal
 image = (
     modal.Image.debian_slim()
     .pip_install_from_requirements("requirements.txt")
+    .add_local_dir(".", remote_path="/root/examind-be")
 )
 
 app = modal.App("examind-be")
@@ -30,7 +31,6 @@ app = modal.App("examind-be")
 
 @app.function(
     image=image,
-    mounts=[modal.Mount.from_local_dir(".", remote_path="/root/examind-be")],
     secrets=[modal.Secret.from_name("examind-env")],
     scaledown_window=300,  # keep warm 5 min after last request; raise on exam days
     timeout=600,
