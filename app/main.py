@@ -18,13 +18,13 @@ from app.api.v1.endpoints.proctoring_ws import router as ws_router
 
 app = FastAPI(
     title="EXAMIND API",
-    description="AI-Powered Online Examination Platform API (FastAPI + PyTorch + MySQL)",
+    description="AI-Powered Online Examination Platform API (FastAPI + MySQL)",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
 
-# Configure CORS for Vue 3 frontend
+# Configure CORS for the frontend (origins come from CORS_ORIGINS env)
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"http(s)?://(localhost|127\.0\.0\.1)(:\d+)?",

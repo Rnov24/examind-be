@@ -1,6 +1,6 @@
 import os
 from typing import List, Union
-from pydantic import AnyHttpUrl, validator
+from pydantic import AnyHttpUrl, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,8 +24,8 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "mysql+pymysql://root:@localhost:3306/examind"
 
-    # Security / JWT
-    SECRET_KEY: str = "examind_super_secret_jwt_key_2026_production_grade_security"
+    # Security / JWT — never ship the dev default to production
+    SECRET_KEY: str = "examind_dev_only_change_in_production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
 
@@ -48,6 +48,16 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore"
     )
+
+    @model_validator(mode="after")
+    def _require_production_secrets(self):
+        if self.ENVIRONMENT.lower() == "production":
+            if not self.SECRET_KEY or self.SECRET_KEY == "examind_dev_only_change_in_production":
+                raise ValueError(
+                    "SECRET_KEY must be set via environment variable when ENVIRONMENT=production. "
+                    "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
+                )
+        return self
 
     @property
     def cors_origins_list(self) -> List[str]:

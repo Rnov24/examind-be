@@ -10,11 +10,10 @@ pymysql>=1.1.1
 cryptography>=44.0.0
 alembic>=1.14.0
 
-# PyTorch, Model Serving & ML Pipeline
-torch>=2.2.0
-torchvision>=0.17.0
-numpy>=1.26.0
-pillow>=10.2.0
+# Auth (JWT/bcrypt) & HTTP clients
+python-jose[cryptography]>=3.3.0
+bcrypt>=4.1.0
+requests>=2.32.0
 
 # Utilities & Async
 python-dotenv>=1.0.1

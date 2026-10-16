@@ -1,6 +1,6 @@
 import random
 import re
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from app.services.ai.base import AIServiceInterface
 from app.services.ai.rubric_generator import generate_4d_rubric
 from app.schemas.question import (
