@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EXAMIND — Flowchart Activity Diagram (Standar ANSI / ISO 5807)</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: #f8fafc;
+      color: #000000;
+      font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+      padding: 30px 20px;
+      min-width: 1450px;
+    }
+
+    /* Header Dokumen Skripsi / Jurnal */
+    .doc-header {
+      text-align: center;
+      margin-bottom: 20px;
+      border-bottom: 2px solid #000000;
+      padding-bottom: 12px;
+      max-width: 1400px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .doc-header h1 {
+      font-size: 20px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .doc-header p {
+      font-size: 13px;
+      color: #4b5563;
+      margin-top: 4px;
+    }
+
+    /* Navigasi Tab */
+    .toolbar-bar {
+      max-width: 1400px;
+      margin: 0 auto 16px auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .tab-group {
+      display: flex;
+      gap: 8px;
+    }
+
+    .tab-btn {
+      background: #ffffff;
+      border: 1.5px solid #000000;
+      color: #000000;
+      padding: 8px 16px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .tab-btn.active, .tab-btn:hover {
+      background: #000000;
+      color: #ffffff;
+    }
+
+    .btn-print {
+      background: #000000;
+      color: #ffffff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .btn-print:hover {
+      background: #374151;
+    }
+
+    /* Diagram Canvas Wrapper */
+    .stage-wrapper {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .diagram-panel {
+      display: none;
+      background: #ffffff;
+      border: 2px solid #000000;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+      margin-bottom: 30px;
+      overflow-x: auto;
+    }
+
+    .diagram-panel.active {
+      display: block;
+    }
+
+    .panel-title {
+      background: #f1f5f9;
+      border-bottom: 2px solid #000000;
+      padding: 12px 20px;
+      text-align: center;
+      font-size: 15px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* Flowchart Pure SVG Rendering */
+    .flowchart-svg {
+      display: block;
+      margin: 0 auto;
+      background: #ffffff;
+    }
+
+    /* Teks dalam Simbol */
+    .fc-text {
+      font-family: Arial, sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      fill: #000000;
+      text-anchor: middle;
+      dominant-baseline: central;
+    }
+
+    .fc-text-title {
+      font-family: Arial, sans-serif;
+      font-size: 13px;
+      font-weight: bold;
+      text-transform: uppercase;
+      fill: #000000;
+      text-anchor: middle;
+      dominant-baseline: central;
+    }
+
+    .fc-label {
+      font-family: Arial, sans-serif;
+      font-size: 11px;
+      font-weight: bold;
+      fill: #000000;
+      text-anchor: middle;
+      dominant-baseline: central;
+    }
+
+    .fc-label-no {
+      font-family: Arial, sans-serif;
+      font-size: 11px;
+      font-weight: bold;
+      fill: #b91c1c;
+      text-anchor: middle;
+      dominant-baseline: central;
+    }
+
+    /* Legend Box */
+    .legend-box {
+      max-width: 1400px;
+      margin: 20px auto 0 auto;
+      border: 1.5px solid #000000;
+      background: #ffffff;
+      padding: 12px 20px;
+      display: flex;
+      justify-content: center;
+      gap: 30px;
+      flex-wrap: wrap;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    @media print {
+      body { padding: 0; background: #ffffff; }
+      .toolbar-bar { display: none; }
+      .diagram-panel { display: block !important; border: 2px solid #000000; margin-bottom: 40px; page-break-after: always; }
+      .legend-box { page-break-after: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header Dokumen Formal -->
+  <header class="doc-header">
+    <h1>EXAMIND — Flowchart Activity Diagram</h1>
+    <p>Standar ANSI / ISO 5807 • Struktur Swimlane 2 Kolom (Aktivitas Aktor &amp; Respon Sistem) • Pengkabelan Ortogonal Baku Tanpa Tabrakan Garis</p>
+  </header>
+
+  <!-- Toolbar Tab Navigasi -->
+  <div class="toolbar-bar">
+    <div class="tab-group">
+      <button class="tab-btn active" onclick="switchTab('superadmin')">1. Super Admin</button>
+      <button class="tab-btn" onclick="switchTab('admin')">2. Admin Sekolah</button>
+      <button class="tab-btn" onclick="switchTab('guru')">3. Guru (Teacher)</button>
+      <button class="tab-btn" onclick="switchTab('siswa')">4. Siswa (Student)</button>
+      <button class="tab-btn" onclick="showAllTabs()">Tampilkan Semua (Cetak / SS)</button>
+    </div>
+    <button class="btn-print" onclick="window.print()">🖨️ Cetak / Simpan PDF</button>
+  </div>
+
+  <div class="stage-wrapper">
+
+    <!-- ========================================================================= -->
+    <!-- DOMAIN 1: SUPER ADMIN                                                     -->
+    <!-- Lebar Canvas: 1300, Tinggi: 1120                                          -->
+    <!-- Kolom Aktor: X=320, Kolom Sistem: X=980, Garis Tengah Swimlane: X=650     -->
+    <!-- ========================================================================= -->
+    <div class="diagram-panel active" id="tab-superadmin">
+      <div class="panel-title">Domain: Super Admin (Pengelolaan Multi-Tenant &amp; Kunci API Eksternal)</div>
+      <svg class="flowchart-svg" width="1300" height="1140" viewBox="0 0 1300 1140">
+        <defs>
+          <marker id="sa-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 9 5 L 0 9 z" fill="#000000" />
+          </marker>
+          <marker id="sa-arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 9 5 L 0 9 z" fill="#b91c1c" />
+          </marker>
+        </defs>
+
+        <!-- Garis Pemisah Swimlane -->
+        <rect x="0" y="0" width="1300" height="42" fill="#f8fafc" stroke="#000000" stroke-width="2"/>
+        <line x1="650" y1="0" x2="650" y2="42" stroke="#000000" stroke-width="2"/>
+        <text x="325" y="24" class="fc-text-title">Aktivitas Super Admin</text>
+        <text x="975" y="24" class="fc-text-title">Respon Sistem EXAMIND</text>
+
+        <line x1="650" y1="42" x2="650" y2="1140" stroke="#000000" stroke-width="1.8" stroke-dasharray="6 4"/>
+
+        <!-- ================= GARIS ALUR (LINES & ARROWS) ================= -->
+        <!-- 1. Start -> Login Input -->
+        <line x1="320" y1="92" x2="320" y2="120" stroke="#000000" stroke-width="1.8" marker-end="url(#sa-arrow)"/>
+
+        <!-- 2. Login Input -> Validasi Kredensial Sistem (Menyeberang ke kanan) -->
+        <line x1="480" y1="145" x2="820" y2="145" stroke="#000000" stroke-width="1.8" marker-end="url(#sa-arrow)"/>
+
+        <!-- 3. Validasi -> Decision Berhasil? -->
+        <line x1="980" y1="170" x2="980" y2="200" stroke="#000000" stroke-width="1.8" marker-end="url(#sa-arrow)"/>
+
+        <!-- 4. Decision Berhasil? [TIDAK] -> Balik ke Input Login Super Admin (Jalur Bypass Kanan X=1220) -->
+        <!-- Keluar kanan diamond X=1080 -> X=1220 -> naik Y=145 -> masuk input kanan X=480? BUKAN: masuk kembali ke atas input Login X=320 Y=106 -->
+        <path d="M 1080 235 L 1220 235 L 1220 106 L 320 106 L 320 120" fill="none" stroke="#b91c1c" stroke-width="1.8" marker-end="url(#sa-arrow-red)"/>
+
+        <!-- 5. Decision Berhasil? [YA] -> Database Agregasi -->
+        <line x1="980" y1="270" x2="980" y2="300" stroke="#000000" stroke-width="1.8" marker-end="url(#sa-arrow)"/>
+
+        <!-- 6. Database Agregasi -> Tampil Dashboard Global (Menyeberang ke kiri) -->
+        <line x1="820" y1="325" x2="480" y2="325" stroke="#000000" stroke-width="1.8" marker-end="url(#sa-arrow)"/>
+
+        <!-- 7. Dashboard -> Input Data Sekolah -->
+        <line x1="320" y1="350" x2="320" y2="380" stroke="#000000" stroke-width="1.8" marker-end="url(#sa-arrow)"/>
+
+        <!-- 8. Input Data Sekolah -> Validasi Kode Unik Sistem (Menyeberang ke kanan) -->
+        <line x1="480" y1="405" x2="820" y2="405" stroke="#000000" stroke-width="1.8" marker-end="url(#sa-arrow)"/>
+
+        <!-- 9. Validasi Kode -> Decision Kode Unik? -->
+        <line x1="980" y1="430" x2="980" y2="460" stroke="#000000" stroke-width="1.8" marker-end="url(#sa-arrow)"/>
+
+        <!-- 10. Decision Kode Unik? [TIDAK] -> Balik ke Input Data Sekolah (Jalur Bypass Kanan X=1220) -->
+        <path d="M 1080 495 L 1220 495 L 1220 366 L 320 366 L 320 380" fill="none" stroke="#b91c1c" stroke-width="1.8" marker-end="url(#sa-arrow-red)"/>
+
+        <!-- 11. Decision Kode Unik? [YA] -> Simpan Tenant Database -->
+        <line x1="980" y1="530" x2="980" y2="560" stroke="#000000" stroke-width="1.8" marker-end="url(#sa-arrow)"/>
+
+        <!-- 12. Simpan Tenant -> Tentukan Kuota Aktor (Menyeberang ke kiri) -->
+        <line x1="820" y1="585" x2="480" y2="585" stroke="#000000" stroke-width="1.8" marker-end="url(#sa-arrow)"/>
+
+        <!-- 13. Tentukan Kuota -> Input Kunci API -->
+        <line x1="320" y1="610" x2="320" y2="640" stroke="#000000" stroke-width="1.8" marker-end="url(#sa-arrow)"/>
+
+        <!-- 14. Input Kunci API -> Enkripsi AES-Fernet (Menyeberang ke kanan) -->
+        <line x1="480" y1="665" x2="820" y2="665" stroke="#000000" stroke-width="1.8" marker-end="url(#sa-arrow)"/>
+
+        <!-- 15. Enkripsi AES -> Simpan Vault Database -->
+        <line x1="980" y1="690" x2="980" y2="720" stroke="#000000" stroke-width="1.8" marker-end="url(#sa-arrow)"/>
+
+        <!-- 16. Simpan Vault -> Tekan Tombol Uji API (Menyeberang ke kiri) -->
+        <line x1="820" y1="745" x2="480" y2="745" stroke="#000000" stroke-width="1.8" marker-end="url(#sa-arrow)"/>
+
+        <!-- 17. Tekan Uji API -> Request Ping Server Provider (Menyeberang ke kanan) -->
+        <path d="M 320 770 L 320 805 L 820 805" fill="none" stroke="#000000" stroke-width="1.8" marker-end="url(#sa-arrow)"/>
+
+        <!-- 18. Ping Server -> Kalkulasi Latensi & Return Status -->
+        <line x1="980" y1="830" x2="980" y2="860" stroke="#000000" stroke-width="1.8" marker-end="url(#sa-arrow)"/>
+
+        <!-- 19. Kalkulasi Latensi -> Terima Status Koneksi (Menyeberang ke kiri) -->
+        <line x1="820" y1="885" x2="480" y2="885" stroke="#000000" stroke-width="1.8" marker-end="url(#sa-arrow)"/>
+
+        <!-- 20. Terima Status Koneksi -> Selesai -->
+        <line x1="320" y1="910" x2="320" y2="950" stroke="#000000" stroke-width="1.8" marker-end="url(#sa-arrow)"/>
+
+        <!-- ================= SIMBOL FLOWCHART ================= -->
+
+        <!-- Row 1: Mulai (Terminator) -->
+        <rect x="230" y="60" width="180" height="32" rx="16" fill="#ffffff" stroke="#000000" stroke-width="2"/>
+        <text x="320" y="76" class="fc-text">Mulai</text>
+
+        <!-- Row 2: Input Login (Parallelogram I/O) -->
+        <polygon points="190,120 480,120 450,170 160,170" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="145" class="fc-text">Input Email &amp; Password Super Admin</text>
+
+        <!-- Row 2 (Sistem): Validasi Autentikasi (Process Rectangle) -->
+        <rect x="820" y="120" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="145" class="fc-text">Validasi Kredensial &amp; Autentikasi JWT</text>
+
+        <!-- Row 3 (Sistem): Decision Kredensial Valid? (Diamond) -->
+        <polygon points="980,200 1080,235 980,270 880,235" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="235" class="fc-text">Kredensial Valid?</text>
+        <!-- Label Decision -->
+        <rect x="990" y="275" width="30" height="15" fill="#ffffff"/>
+        <text x="1005" y="283" class="fc-label">[Ya]</text>
+        <rect x="1090" y="222" width="45" height="15" fill="#ffffff"/>
+        <text x="1112" y="230" class="fc-label-no">[Tidak]</text>
+
+        <!-- Row 4 (Sistem): Database Agregasi Global (Storage Cylinder) -->
+        <g transform="translate(820, 300)">
+          <path d="M 0 10 L 0 40 A 160 10 0 0 0 320 40 L 320 10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <ellipse cx="160" cy="10" rx="160" ry="10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <text x="160" y="28" class="fc-text" fill="#1e3a8a">[Database: Agregasi Data Seluruh Tenant]</text>
+        </g>
+
+        <!-- Row 4 (Aktor): Melihat Dashboard Global (Process) -->
+        <rect x="160" y="300" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="325" class="fc-text">Melihat Statistik Global &amp; Status Server</text>
+
+        <!-- Row 5 (Aktor): Input Data Sekolah Baru (I/O) -->
+        <polygon points="190,380 480,380 450,430 160,430" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="405" class="fc-text">Input Data Sekolah: Nama, Domain &amp; Kode</text>
+
+        <!-- Row 5 (Sistem): Validasi Keunikan Kode (Process) -->
+        <rect x="820" y="380" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="405" class="fc-text">Pengecekan Keunikan Kode Sekolah</text>
+
+        <!-- Row 6 (Sistem): Decision Kode Unik? (Diamond) -->
+        <polygon points="980,460 1080,495 980,530 880,495" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="495" class="fc-text">Kode Unik?</text>
+        <rect x="990" y="535" width="30" height="15" fill="#ffffff"/>
+        <text x="1005" y="543" class="fc-label">[Ya]</text>
+        <rect x="1090" y="482" width="45" height="15" fill="#ffffff"/>
+        <text x="1112" y="490" class="fc-label-no">[Tidak]</text>
+
+        <!-- Row 7 (Sistem): Database Persistensi Tenant (Storage) -->
+        <g transform="translate(820, 560)">
+          <path d="M 0 10 L 0 40 A 160 10 0 0 0 320 40 L 320 10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <ellipse cx="160" cy="10" rx="160" ry="10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <text x="160" y="28" class="fc-text" fill="#1e3a8a">[Database: tenants &amp; quota_subscriptions]</text>
+        </g>
+
+        <!-- Row 7 (Aktor): Menentukan Batasan Kuota (Process) -->
+        <rect x="160" y="560" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="585" class="fc-text">Menentukan Paket Kuota &amp; AI Credits</text>
+
+        <!-- Row 8 (Aktor): Input Kunci API Eksternal (I/O) -->
+        <polygon points="190,640 480,640 450,690 160,690" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="665" class="fc-text">Input Kunci API (Gemini, Resend, dsb)</text>
+
+        <!-- Row 8 (Sistem): Enkripsi Fernet (Process) -->
+        <rect x="820" y="640" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="665" class="fc-text">Enkripsi Kunci API via AES-Fernet</text>
+
+        <!-- Row 9 (Sistem): Storage Vault (Storage) -->
+        <g transform="translate(820, 720)">
+          <path d="M 0 10 L 0 40 A 160 10 0 0 0 320 40 L 320 10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <ellipse cx="160" cy="10" rx="160" ry="10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <text x="160" y="28" class="fc-text" fill="#1e3a8a">[Tabel Enkripsi: system_api_keys]</text>
+        </g>
+
+        <!-- Row 9 (Aktor): Tekan Tombol Uji API (Process) -->
+        <rect x="160" y="720" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="745" class="fc-text">Menekan Tombol Uji Koneksi API</text>
+
+        <!-- Row 10 (Sistem): Request Ping Eksternal (Process) -->
+        <rect x="820" y="780" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="805" class="fc-text">Kirim Request Ping Health Check Provider</text>
+
+        <!-- Row 11 (Sistem): Hitung Latensi (Process) -->
+        <rect x="820" y="860" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="885" class="fc-text">Kalkulasi Latensi ms &amp; Status Aktif</text>
+
+        <!-- Row 11 (Aktor): Terima Laporan Status (I/O Display) -->
+        <polygon points="190,860 480,860 450,910 160,910" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="885" class="fc-text">Menerima Laporan Status &amp; Latensi Aktif</text>
+
+        <!-- Row 12 (Aktor): Selesai (Terminator) -->
+        <rect x="230" y="950" width="180" height="32" rx="16" fill="#ffffff" stroke="#000000" stroke-width="2"/>
+        <text x="320" y="966" class="fc-text">Selesai</text>
+      </svg>
+    </div>
+
+
+    <!-- ========================================================================= -->
+    <!-- DOMAIN 2: ADMIN SEKOLAH                                                   -->
+    <!-- Lebar Canvas: 1300, Tinggi: 1040                                          -->
+    <!-- Kolom Aktor: X=320, Kolom Sistem: X=980, Garis Tengah Swimlane: X=650     -->
+    <!-- ========================================================================= -->
+    <div class="diagram-panel" id="tab-admin">
+      <div class="panel-title">Domain: Admin Sekolah (Pengelolaan Pengguna &amp; Institusi)</div>
+      <svg class="flowchart-svg" width="1300" height="1040" viewBox="0 0 1300 1040">
+        <defs>
+          <marker id="adm-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 9 5 L 0 9 z" fill="#000000" />
+          </marker>
+          <marker id="adm-arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 9 5 L 0 9 z" fill="#b91c1c" />
+          </marker>
+        </defs>
+
+        <rect x="0" y="0" width="1300" height="42" fill="#f8fafc" stroke="#000000" stroke-width="2"/>
+        <line x1="650" y1="0" x2="650" y2="42" stroke="#000000" stroke-width="2"/>
+        <text x="325" y="24" class="fc-text-title">Aktivitas Admin Sekolah</text>
+        <text x="975" y="24" class="fc-text-title">Respon Sistem EXAMIND</text>
+
+        <line x1="650" y1="42" x2="650" y2="1040" stroke="#000000" stroke-width="1.8" stroke-dasharray="6 4"/>
+
+        <!-- ================= GARIS ALUR ================= -->
+        <!-- 1. Start -> Login -->
+        <line x1="320" y1="92" x2="320" y2="120" stroke="#000000" stroke-width="1.8" marker-end="url(#adm-arrow)"/>
+
+        <!-- 2. Login -> Validasi Tenant Institusi (Menyeberang ke kanan) -->
+        <line x1="480" y1="145" x2="820" y2="145" stroke="#000000" stroke-width="1.8" marker-end="url(#adm-arrow)"/>
+
+        <!-- 3. Validasi -> Decision Sesi Valid? -->
+        <line x1="980" y1="170" x2="980" y2="200" stroke="#000000" stroke-width="1.8" marker-end="url(#adm-arrow)"/>
+
+        <!-- 4. Decision Sesi Valid? [TIDAK] -> Balik ke Input Login (Jalur Bypass Kanan X=1220) -->
+        <path d="M 1080 235 L 1220 235 L 1220 106 L 320 106 L 320 120" fill="none" stroke="#b91c1c" stroke-width="1.8" marker-end="url(#adm-arrow-red)"/>
+
+        <!-- 5. Decision Sesi Valid? [YA] -> Database Agregasi Pengguna & Kelas -->
+        <line x1="980" y1="270" x2="980" y2="300" stroke="#000000" stroke-width="1.8" marker-end="url(#adm-arrow)"/>
+
+        <!-- 6. Database Agregasi -> Tampil Ringkasan Statistik (Menyeberang ke kiri) -->
+        <line x1="820" y1="325" x2="480" y2="325" stroke="#000000" stroke-width="1.8" marker-end="url(#adm-arrow)"/>
+
+        <!-- 7. Ringkasan Statistik -> Input Data Pengguna (Guru / Siswa) -->
+        <line x1="320" y1="350" x2="320" y2="380" stroke="#000000" stroke-width="1.8" marker-end="url(#adm-arrow)"/>
+
+        <!-- 8. Input Pengguna -> Validasi NISN/NIP & Kuota (Menyeberang ke kanan) -->
+        <line x1="480" y1="405" x2="820" y2="405" stroke="#000000" stroke-width="1.8" marker-end="url(#adm-arrow)"/>
+
+        <!-- 9. Validasi -> Decision Kuota Sekolah Cukup? -->
+        <line x1="980" y1="430" x2="980" y2="460" stroke="#000000" stroke-width="1.8" marker-end="url(#adm-arrow)"/>
+
+        <!-- 10. Decision Kuota [TIDAK] -> Balik ke Input Pengguna (Jalur Bypass Kanan X=1220) -->
+        <path d="M 1080 495 L 1220 495 L 1220 366 L 320 366 L 320 380" fill="none" stroke="#b91c1c" stroke-width="1.8" marker-end="url(#adm-arrow-red)"/>
+
+        <!-- 11. Decision Kuota [YA] -> Database Simpan Akun Pengguna Baru -->
+        <line x1="980" y1="530" x2="980" y2="560" stroke="#000000" stroke-width="1.8" marker-end="url(#adm-arrow)"/>
+
+        <!-- 12. Simpan Akun -> Pilih Ubah Status Akun (Aktif/Nonaktif) (Menyeberang ke kiri) -->
+        <line x1="820" y1="585" x2="480" y2="585" stroke="#000000" stroke-width="1.8" marker-end="url(#adm-arrow)"/>
+
+        <!-- 13. Ubah Status -> Decision Guard Akun Sendiri (Menyeberang ke kanan) -->
+        <line x1="480" y1="665" x2="880" y2="665" stroke="#000000" stroke-width="1.8" marker-end="url(#adm-arrow)"/>
+
+        <!-- 14. Decision Guard [TIDAK: Mencoba Deaktivasi Diri Sendiri] -> Ditolak, Balik ke Pilih Ubah Status -->
+        <path d="M 1080 665 L 1220 665 L 1220 626 L 320 626 L 320 640" fill="none" stroke="#b91c1c" stroke-width="1.8" marker-end="url(#adm-arrow-red)"/>
+
+        <!-- 15. Decision Guard [YA: Bukan Akun Sendiri] -> Update Database Status Pengguna -->
+        <line x1="980" y1="700" x2="980" y2="730" stroke="#000000" stroke-width="1.8" marker-end="url(#adm-arrow)"/>
+
+        <!-- 16. Update DB -> Menerima Konfirmasi Pembaruan (Menyeberang ke kiri) -->
+        <line x1="820" y1="755" x2="480" y2="755" stroke="#000000" stroke-width="1.8" marker-end="url(#adm-arrow)"/>
+
+        <!-- 17. Konfirmasi -> Selesai -->
+        <line x1="320" y1="780" x2="320" y2="830" stroke="#000000" stroke-width="1.8" marker-end="url(#adm-arrow)"/>
+
+        <!-- ================= SIMBOL ================= -->
+        <!-- Mulai -->
+        <rect x="230" y="60" width="180" height="32" rx="16" fill="#ffffff" stroke="#000000" stroke-width="2"/>
+        <text x="320" y="76" class="fc-text">Mulai</text>
+
+        <!-- Input Login -->
+        <polygon points="190,120 480,120 450,170 160,170" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="145" class="fc-text">Input Kredensial Admin Institusi</text>
+
+        <!-- Validasi Sistem -->
+        <rect x="820" y="120" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="145" class="fc-text">Validasi Kredensial &amp; Tenant Institusi</text>
+
+        <!-- Decision Sesi Valid? -->
+        <polygon points="980,200 1080,235 980,270 880,235" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="235" class="fc-text">Sesi Valid?</text>
+        <rect x="990" y="275" width="30" height="15" fill="#ffffff"/>
+        <text x="1005" y="283" class="fc-label">[Ya]</text>
+        <rect x="1090" y="222" width="45" height="15" fill="#ffffff"/>
+        <text x="1112" y="230" class="fc-label-no">[Tidak]</text>
+
+        <!-- Database Statistik Pengguna -->
+        <g transform="translate(820, 300)">
+          <path d="M 0 10 L 0 40 A 160 10 0 0 0 320 40 L 320 10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <ellipse cx="160" cy="10" rx="160" ry="10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <text x="160" y="28" class="fc-text" fill="#1e3a8a">[Database: school_users &amp; classes]</text>
+        </g>
+
+        <!-- Tampil Dashboard -->
+        <rect x="160" y="300" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="325" class="fc-text">Melihat Ringkasan Pengguna &amp; Kelas</text>
+
+        <!-- Input Pengguna Baru -->
+        <polygon points="190,380 480,380 450,430 160,430" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="405" class="fc-text">Input Data Pengguna Baru (Guru/Siswa)</text>
+
+        <!-- Validasi Pengguna Sistem -->
+        <rect x="820" y="380" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="405" class="fc-text">Validasi NISN/NIP &amp; Hash Bcrypt</text>
+
+        <!-- Decision Kuota Cukup? -->
+        <polygon points="980,460 1080,495 980,530 880,495" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="495" class="fc-text">Kuota Cukup?</text>
+        <rect x="990" y="535" width="30" height="15" fill="#ffffff"/>
+        <text x="1005" y="543" class="fc-label">[Ya]</text>
+        <rect x="1090" y="482" width="45" height="15" fill="#ffffff"/>
+        <text x="1112" y="490" class="fc-label-no">[Tidak]</text>
+
+        <!-- Database Simpan Akun -->
+        <g transform="translate(820, 560)">
+          <path d="M 0 10 L 0 40 A 160 10 0 0 0 320 40 L 320 10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <ellipse cx="160" cy="10" rx="160" ry="10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <text x="160" y="28" class="fc-text" fill="#1e3a8a">[Database: users_table]</text>
+        </g>
+
+        <!-- Ubah Status Pengguna -->
+        <rect x="160" y="640" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="665" class="fc-text">Pilih Ubah Status Akun (Aktif/Nonaktif)</text>
+
+        <!-- Decision Guard Akun Sendiri -->
+        <polygon points="980,630 1080,665 980,700 880,665" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="665" class="fc-text">Bukan Diri Sendiri?</text>
+        <rect x="990" y="705" width="30" height="15" fill="#ffffff"/>
+        <text x="1005" y="713" class="fc-label">[Ya]</text>
+        <rect x="1090" y="652" width="45" height="15" fill="#ffffff"/>
+        <text x="1112" y="660" class="fc-label-no">[Tidak]</text>
+
+        <!-- Database Update Status Akun -->
+        <g transform="translate(820, 730)">
+          <path d="M 0 10 L 0 40 A 160 10 0 0 0 320 40 L 320 10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <ellipse cx="160" cy="10" rx="160" ry="10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <text x="160" y="28" class="fc-text" fill="#1e3a8a">[Update Status: users.is_active]</text>
+        </g>
+
+        <!-- Terima Konfirmasi Status -->
+        <polygon points="190,730 480,730 450,780 160,780" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="755" class="fc-text">Menerima Konfirmasi Pembaruan Status Akun</text>
+
+        <!-- Selesai -->
+        <rect x="230" y="830" width="180" height="32" rx="16" fill="#ffffff" stroke="#000000" stroke-width="2"/>
+        <text x="320" y="846" class="fc-text">Selesai</text>
+      </svg>
+    </div>
+
+
+    <!-- ========================================================================= -->
+    <!-- DOMAIN 3: GURU (TEACHER)                                                   -->
+    <!-- Lebar Canvas: 1300, Tinggi: 1460                                          -->
+    <!-- Kolom Aktor: X=320, Kolom Sistem: X=980, Garis Tengah Swimlane: X=650     -->
+    <!-- ========================================================================= -->
+    <div class="diagram-panel" id="tab-guru">
+      <div class="panel-title">Domain: Guru (Penyusunan Bank Soal, Live Pengawasan &amp; Penilaian)</div>
+      <svg class="flowchart-svg" width="1300" height="1460" viewBox="0 0 1300 1460">
+        <defs>
+          <marker id="g-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 9 5 L 0 9 z" fill="#000000" />
+          </marker>
+          <marker id="g-arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 9 5 L 0 9 z" fill="#b91c1c" />
+          </marker>
+        </defs>
+
+        <rect x="0" y="0" width="1300" height="42" fill="#f8fafc" stroke="#000000" stroke-width="2"/>
+        <line x1="650" y1="0" x2="650" y2="42" stroke="#000000" stroke-width="2"/>
+        <text x="325" y="24" class="fc-text-title">Aktivitas Guru</text>
+        <text x="975" y="24" class="fc-text-title">Respon Sistem EXAMIND</text>
+
+        <line x1="650" y1="42" x2="650" y2="1460" stroke="#000000" stroke-width="1.8" stroke-dasharray="6 4"/>
+
+        <!-- ================= GARIS ALUR ================= -->
+        <!-- 1. Start -> Login Guru -->
+        <line x1="320" y1="92" x2="320" y2="120" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 2. Login -> Validasi Hak Akses Guru (Menyeberang ke kanan) -->
+        <line x1="480" y1="145" x2="820" y2="145" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 3. Validasi -> Input Buat Kelas & Siswa (Menyeberang ke kiri) -->
+        <path d="M 980 170 L 980 190 L 480 190 L 480 200" fill="none" stroke="#000000" stroke-width="1.8"/>
+        <!-- Masuk ke input buat kelas X=320 Y=200 -->
+        <line x1="320" y1="180" x2="320" y2="200" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 4. Buat Kelas -> Simpan Database Kelas (Menyeberang ke kanan) -->
+        <line x1="480" y1="225" x2="820" y2="225" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 5. Simpan Database Kelas -> Buat Bank Soal Mapel (Menyeberang ke kiri) -->
+        <path d="M 820 235 L 560 235 L 560 280 L 480 280" fill="none" stroke="#000000" stroke-width="1.8"/>
+        <line x1="320" y1="250" x2="320" y2="280" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 6. Buat Bank Soal -> Decision Pilih Metode Soal? -->
+        <line x1="320" y1="330" x2="320" y2="360" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 7. Decision Pilih Metode: [Ya: Gunakan AI] -> Input Prompt AI (Turun lurus X=320) -->
+        <line x1="320" y1="430" x2="320" y2="460" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 8. Decision Pilih Metode: [Tidak: Manual] -> Bypass Sisi Kiri X=80 langsung ke Simpan Soal Y=600 -->
+        <path d="M 220 395 L 80 395 L 80 625 L 160 625" fill="none" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 9. Input Prompt AI -> Generate via Gemini AI (Menyeberang ke kanan) -->
+        <line x1="480" y1="485" x2="820" y2="485" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 10. Generate Gemini -> Meninjau & Menyimpan Butir Soal (Menyeberang ke kiri) -->
+        <path d="M 820 510 L 560 510 L 560 610 L 480 610" fill="none" stroke="#000000" stroke-width="1.8"/>
+        <line x1="320" y1="510" x2="320" y2="600" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 11. Simpan Butir Soal -> Database Bank Soal (Menyeberang ke kanan) -->
+        <line x1="480" y1="625" x2="820" y2="625" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 12. Simpan DB Bank Soal -> Buat Paket Ujian & Waktu (Menyeberang ke kiri) -->
+        <path d="M 820 635 L 560 635 L 560 700 L 480 700" fill="none" stroke="#000000" stroke-width="1.8"/>
+        <line x1="320" y1="650" x2="320" y2="700" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 13. Buat Paket Ujian -> Validasi Jadwal Sistem (Menyeberang ke kanan) -->
+        <line x1="480" y1="725" x2="820" y2="725" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 14. Validasi Jadwal -> Decision Jadwal Valid? -->
+        <line x1="980" y1="750" x2="980" y2="770" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 15. Decision Jadwal [TIDAK] -> Balik ke Buat Paket Ujian (Jalur Bypass Kanan X=1220) -->
+        <path d="M 1080 805 L 1220 805 L 1220 686 L 320 686 L 320 700" fill="none" stroke="#b91c1c" stroke-width="1.8" marker-end="url(#g-arrow-red)"/>
+
+        <!-- 16. Decision Jadwal [YA] -> Database Simpan Paket Ujian -->
+        <line x1="980" y1="840" x2="980" y2="860" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 17. Simpan Paket Ujian -> Publikasikan Paket Ujian ke Kelas (Menyeberang ke kiri) -->
+        <line x1="820" y1="885" x2="480" y2="885" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 18. Publikasikan Ujian -> Buka Dashboard Live Monitoring -->
+        <line x1="320" y1="910" x2="320" y2="940" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 19. Buka Live Monitoring -> Buka Streaming Kamera via WebSocket (Menyeberang ke kanan) -->
+        <line x1="480" y1="965" x2="820" y2="965" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 20. Buka Streaming WebSocket -> Decision Ada Pelanggaran Siswa? (Menyeberang ke kiri) -->
+        <path d="M 820 975 L 560 975 L 560 1045 L 420 1045" fill="none" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 21. Decision Pelanggaran: [Ya] -> Kirim Peringatan ke Layar Siswa (Turun lurus) -->
+        <line x1="320" y1="1080" x2="320" y2="1110" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 22. Decision Pelanggaran: [Tidak] -> Bypass Sisi Kiri X=80 langsung ke Review Hasil Ujian Y=1200 -->
+        <path d="M 220 1045 L 80 1045 L 80 1225 L 160 1225" fill="none" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 23. Kirim Peringatan -> Push WebSocket ke Siswa (Menyeberang ke kanan) -->
+        <line x1="480" y1="1135" x2="820" y2="1135" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 24. Push WebSocket Siswa -> Meninjau Koreksi Nilai & Hasil Ujian (Menyeberang ke kiri) -->
+        <path d="M 820 1145 L 560 1145 L 560 1215 L 480 1215" fill="none" stroke="#000000" stroke-width="1.8"/>
+        <line x1="320" y1="1160" x2="320" y2="1200" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 25. Meninjau Koreksi -> Decision Setuju Skor AI? -->
+        <line x1="480" y1="1225" x2="880" y2="1225" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 26. Decision Skor AI: [Tidak: Override] -> Balik Ubah Skor Manual di kiri -->
+        <path d="M 980 1190 L 980 1175 L 320 1175 L 320 1200" fill="none" stroke="#b91c1c" stroke-width="1.8" marker-end="url(#g-arrow-red)"/>
+
+        <!-- 27. Decision Skor AI: [Ya: Setuju] -> Terbitkan Rekap Nilai PDF & Excel (Document) -->
+        <line x1="980" y1="1260" x2="980" y2="1290" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 28. Terbitkan Rekap Dokumen -> Download Rekap Nilai & Berita Acara (Menyeberang ke kiri) -->
+        <line x1="820" y1="1315" x2="480" y2="1315" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- 29. Download Rekap -> Selesai -->
+        <line x1="320" y1="1340" x2="320" y2="1380" stroke="#000000" stroke-width="1.8" marker-end="url(#g-arrow)"/>
+
+        <!-- ================= SIMBOL ================= -->
+        <!-- Mulai -->
+        <rect x="230" y="60" width="180" height="32" rx="16" fill="#ffffff" stroke="#000000" stroke-width="2"/>
+        <text x="320" y="76" class="fc-text">Mulai</text>
+
+        <!-- Login Guru -->
+        <polygon points="190,120 480,120 450,170 160,170" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="145" class="fc-text">Masuk Portal Guru dengan Kredensial</text>
+
+        <!-- Validasi Hak Akses Guru -->
+        <rect x="820" y="120" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="145" class="fc-text">Validasi Autentikasi Guru &amp; Hak Akses</text>
+
+        <!-- Input Data Kelas & Siswa -->
+        <polygon points="190,200 480,200 450,250 160,250" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="225" class="fc-text">Input Data Kelas &amp; Daftarkan Siswa</text>
+
+        <!-- Database Kelas -->
+        <g transform="translate(820, 200)">
+          <path d="M 0 10 L 0 40 A 160 10 0 0 0 320 40 L 320 10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <ellipse cx="160" cy="10" rx="160" ry="10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <text x="160" y="28" class="fc-text" fill="#1e3a8a">[Database: classes &amp; class_members]</text>
+        </g>
+
+        <!-- Buat Bank Soal Mapel -->
+        <rect x="160" y="280" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="305" class="fc-text">Membuat Bank Soal Mata Pelajaran</text>
+
+        <!-- Decision Gunakan AI? -->
+        <polygon points="320,360 420,395 320,430 220,395" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="395" class="fc-text">Gunakan AI?</text>
+        <rect x="330" y="435" width="30" height="15" fill="#ffffff"/>
+        <text x="345" y="443" class="fc-label">[Ya]</text>
+        <rect x="120" y="382" width="90" height="15" fill="#ffffff"/>
+        <text x="165" y="390" class="fc-label-no">[Tidak: Manual]</text>
+
+        <!-- Input Prompt Topik AI -->
+        <polygon points="190,460 480,460 450,510 160,510" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="485" class="fc-text">Input Prompt Topik &amp; Taksonomi Bloom</text>
+
+        <!-- Generate Butir Soal Gemini -->
+        <rect x="820" y="460" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="485" class="fc-text">Generate Butir Soal &amp; Rubrik via AI</text>
+
+        <!-- Meninjau & Simpan Soal -->
+        <rect x="160" y="600" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="625" class="fc-text">Meninjau &amp; Menyimpan Butir Soal</text>
+
+        <!-- Database Soal & Rubrik -->
+        <g transform="translate(820, 600)">
+          <path d="M 0 10 L 0 40 A 160 10 0 0 0 320 40 L 320 10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <ellipse cx="160" cy="10" rx="160" ry="10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <text x="160" y="28" class="fc-text" fill="#1e3a8a">[Database: questions &amp; rubrics]</text>
+        </g>
+
+        <!-- Buat Paket Ujian -->
+        <rect x="160" y="700" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="725" class="fc-text">Membuat Paket Ujian &amp; Mengatur Waktu</text>
+
+        <!-- Validasi Jadwal Sistem -->
+        <rect x="820" y="700" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="725" class="fc-text">Validasi Rentang Waktu &amp; Butir Soal</text>
+
+        <!-- Decision Jadwal Valid? -->
+        <polygon points="980,770 1080,805 980,840 880,805" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="805" class="fc-text">Jadwal Valid?</text>
+        <rect x="990" y="845" width="30" height="15" fill="#ffffff"/>
+        <text x="1005" y="853" class="fc-label">[Ya]</text>
+        <rect x="1090" y="792" width="45" height="15" fill="#ffffff"/>
+        <text x="1112" y="800" class="fc-label-no">[Tidak]</text>
+
+        <!-- Database Exams -->
+        <g transform="translate(820, 860)">
+          <path d="M 0 10 L 0 40 A 160 10 0 0 0 320 40 L 320 10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <ellipse cx="160" cy="10" rx="160" ry="10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <text x="160" y="28" class="fc-text" fill="#1e3a8a">[Database: exams &amp; exam_allocations]</text>
+        </g>
+
+        <!-- Publikasikan Paket Ujian -->
+        <rect x="160" y="860" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="885" class="fc-text">Mempublikasikan Paket Ujian ke Kelas</text>
+
+        <!-- Buka Dashboard Live Monitoring -->
+        <rect x="160" y="940" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="965" class="fc-text">Membuka Dashboard Live Monitoring</text>
+
+        <!-- Buka WebSocket Proctoring -->
+        <rect x="820" y="940" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="965" class="fc-text">Buka Saluran WebSocket &amp; Stream Frame</text>
+
+        <!-- Decision Ada Pelanggaran? -->
+        <polygon points="320,1010 420,1045 320,1080 220,1045" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="1045" class="fc-text">Ada Pelanggaran?</text>
+        <rect x="330" y="1085" width="30" height="15" fill="#ffffff"/>
+        <text x="345" y="1093" class="fc-label">[Ya]</text>
+        <rect x="120" y="1032" width="85" height="15" fill="#ffffff"/>
+        <text x="162" y="1040" class="fc-label-no">[Tidak: Lanjut]</text>
+
+        <!-- Kirim Pesan Peringatan Siswa -->
+        <polygon points="190,1110 480,1110 450,1160 160,1160" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="1135" class="fc-text">Kirim Pesan Peringatan ke Layar Siswa</text>
+
+        <!-- Push WebSocket Warning -->
+        <rect x="820" y="1110" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="1135" class="fc-text">Push Pesan Peringatan via WebSocket</text>
+
+        <!-- Meninjau Evaluasi & Koreksi Nilai -->
+        <rect x="160" y="1200" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="1225" class="fc-text">Meninjau Evaluasi Nilai &amp; Skor Esai AI</text>
+
+        <!-- Decision Setuju Skor AI? -->
+        <polygon points="980,1190 1080,1225 980,1260 880,1225" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="1225" class="fc-text">Setuju Skor AI?</text>
+        <rect x="990" y="1265" width="30" height="15" fill="#ffffff"/>
+        <text x="1005" y="1273" class="fc-label">[Ya]</text>
+        <rect x="945" y="1160" width="70" height="15" fill="#ffffff"/>
+        <text x="980" y="1168" class="fc-label-no">[Tidak: Koreksi]</text>
+
+        <!-- Dokumen Rekap Nilai & Berita Acara (Document) -->
+        <g transform="translate(820, 1290)">
+          <path d="M 0 0 L 320 0 L 320 40 Q 240 54 160 40 Q 80 26 0 40 Z" fill="#fdfdfd" stroke="#000000" stroke-width="1.8"/>
+          <text x="160" y="22" class="fc-text" font-weight="bold">[Dokumen: Rekap Nilai &amp; Berita Acara PDF]</text>
+        </g>
+
+        <!-- Download Rekap Nilai -->
+        <polygon points="190,1290 480,1290 450,1340 160,1340" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="1315" class="fc-text">Mengekspor Rekap Nilai Excel &amp; Berita Acara</text>
+
+        <!-- Selesai -->
+        <rect x="230" y="1380" width="180" height="32" rx="16" fill="#ffffff" stroke="#000000" stroke-width="2"/>
+        <text x="320" y="1396" class="fc-text">Selesai</text>
+      </svg>
+    </div>
+
+
+    <!-- ========================================================================= -->
+    <!-- DOMAIN 4: SISWA (STUDENT)                                                 -->
+    <!-- Lebar Canvas: 1300, Tinggi: 1440                                          -->
+    <!-- Kolom Aktor: X=320, Kolom Sistem: X=980, Garis Tengah Swimlane: X=650     -->
+    <!-- ========================================================================= -->
+    <div class="diagram-panel" id="tab-siswa">
+      <div class="panel-title">Domain: Siswa (Autentikasi OTP, Dual-Camera Proctoring &amp; Ujian)</div>
+      <svg class="flowchart-svg" width="1300" height="1440" viewBox="0 0 1300 1440">
+        <defs>
+          <marker id="s-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 9 5 L 0 9 z" fill="#000000" />
+          </marker>
+          <marker id="s-arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1 L 9 5 L 0 9 z" fill="#b91c1c" />
+          </marker>
+        </defs>
+
+        <rect x="0" y="0" width="1300" height="42" fill="#f8fafc" stroke="#000000" stroke-width="2"/>
+        <line x1="650" y1="0" x2="650" y2="42" stroke="#000000" stroke-width="2"/>
+        <text x="325" y="24" class="fc-text-title">Aktivitas Siswa</text>
+        <text x="975" y="24" class="fc-text-title">Respon Sistem EXAMIND</text>
+
+        <line x1="650" y1="42" x2="650" y2="1440" stroke="#000000" stroke-width="1.8" stroke-dasharray="6 4"/>
+
+        <!-- ================= GARIS ALUR ================= -->
+        <!-- 1. Start -> Minta OTP -->
+        <line x1="320" y1="92" x2="320" y2="120" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- 2. Minta OTP -> Generate OTP 6 Digit Sistem (Menyeberang ke kanan) -->
+        <line x1="480" y1="145" x2="820" y2="145" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- 3. Generate OTP -> Masukkan OTP (Menyeberang ke kiri) -->
+        <path d="M 820 155 L 560 155 L 560 215 L 480 215" fill="none" stroke="#000000" stroke-width="1.8"/>
+        <line x1="320" y1="170" x2="320" y2="200" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- 4. Masukkan OTP -> Validasi Timing-Safe OTP Sistem (Menyeberang ke kanan) -->
+        <line x1="480" y1="225" x2="820" y2="225" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- 5. Validasi OTP -> Decision OTP Valid? -->
+        <line x1="980" y1="250" x2="980" y2="270" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- 6. Decision OTP Valid? [TIDAK] -> Balik Masukkan OTP (Jalur Bypass Kanan X=1220) -->
+        <path d="M 1080 305 L 1220 305 L 1220 186 L 320 186 L 320 200" fill="none" stroke="#b91c1c" stroke-width="1.8" marker-end="url(#s-arrow-red)"/>
+
+        <!-- 7. Decision OTP Valid? [YA] -> Masuk Portal Siswa (Menyeberang ke kiri) -->
+        <path d="M 980 340 L 980 360 L 480 360 L 480 375" fill="none" stroke="#000000" stroke-width="1.8"/>
+        <line x1="320" y1="250" x2="320" y2="360" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- 8. Masuk Portal Siswa -> Memilih Paket Ujian -->
+        <line x1="320" y1="410" x2="320" y2="440" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- 9. Pilih Ujian -> Session Guard & Pairing Token (Menyeberang ke kanan) -->
+        <line x1="480" y1="465" x2="820" y2="465" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- 10. Session Guard -> Persiapan Fullscreen & Kamera HP (Menyeberang ke kiri) -->
+        <path d="M 820 480 L 560 480 L 560 540 L 480 540" fill="none" stroke="#000000" stroke-width="1.8"/>
+        <line x1="320" y1="490" x2="320" y2="530" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- 11. Persiapan Kamera -> Edge CV & Deteksi Meja HP (Menyeberang ke kanan) -->
+        <line x1="480" y1="555" x2="820" y2="555" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- 12. Edge CV -> Mengerjakan Butir Soal (Menyeberang ke kiri) -->
+        <path d="M 820 570 L 560 570 L 560 630 L 480 630" fill="none" stroke="#000000" stroke-width="1.8"/>
+        <line x1="320" y1="580" x2="320" y2="620" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- 13. Mengerjakan Soal -> Autosave Database & Sync Server (Menyeberang ke kanan) -->
+        <line x1="480" y1="645" x2="820" y2="645" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- 14. Autosave -> Decision Pelanggaran Fatal? -->
+        <line x1="980" y1="670" x2="980" y2="700" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- 15. Decision Pelanggaran: [YA: Fatal] -> Diskualifikasi Sesi (Turun ke bawah X=980) -->
+        <line x1="980" y1="770" x2="980" y2="800" stroke="#b91c1c" stroke-width="1.8" marker-end="url(#s-arrow-red)"/>
+
+        <!-- 16. Diskualifikasi -> Tampil Layar Diskualifikasi di Kiri -->
+        <line x1="820" y1="825" x2="480" y2="825" stroke="#b91c1c" stroke-width="1.8" marker-end="url(#s-arrow-red)"/>
+
+        <!-- 17. Tampil Diskualifikasi -> Selesai Diskualifikasi -->
+        <line x1="320" y1="850" x2="320" y2="880" stroke="#b91c1c" stroke-width="1.8" marker-end="url(#s-arrow-red)"/>
+
+        <!-- 18. Decision Pelanggaran: [TIDAK: Aman] -> Mengonfirmasi Pengumpulan Jawaban -->
+        <path d="M 880 735 L 560 735 L 560 935 L 480 935" fill="none" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- 19. Konfirmasi Kumpul -> Evaluasi Otomatis MCQ & AI Esai (Menyeberang ke kanan) -->
+        <line x1="480" y1="945" x2="820" y2="945" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- 20. Evaluasi Sistem -> Simpan Lembar Jawaban & Nilai (Storage) -->
+        <line x1="980" y1="970" x2="980" y2="1000" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- 21. Simpan DB Nilai -> Melihat Skor & Pembahasan Formatif (Menyeberang ke kiri) -->
+        <line x1="820" y1="1025" x2="480" y2="1025" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- 22. Tampil Hasil Nilai -> Cetak Transkrip Nilai Siswa (Document Sistem) -->
+        <path d="M 320 1050 L 320 1105 L 820 1105" fill="none" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- 23. Cetak Dokumen -> Mengunduh Transkrip Nilai PDF (Menyeberang ke kiri) -->
+        <line x1="820" y1="1135" x2="480" y2="1135" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- 24. Unduh PDF -> Selesai -->
+        <line x1="320" y1="1160" x2="320" y2="1200" stroke="#000000" stroke-width="1.8" marker-end="url(#s-arrow)"/>
+
+        <!-- ================= SIMBOL ================= -->
+        <!-- Mulai -->
+        <rect x="230" y="60" width="180" height="32" rx="16" fill="#ffffff" stroke="#000000" stroke-width="2"/>
+        <text x="320" y="76" class="fc-text">Mulai</text>
+
+        <!-- Minta OTP -->
+        <polygon points="190,120 480,120 450,170 160,170" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="145" class="fc-text">Meminta Kode OTP Verifikasi Akun</text>
+
+        <!-- Generate OTP 6 Digit -->
+        <rect x="820" y="120" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="145" class="fc-text">Generate OTP Acak &amp; Kirim via Email</text>
+
+        <!-- Input Kode OTP -->
+        <polygon points="190,200 480,200 450,250 160,250" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="225" class="fc-text">Memasukkan 6 Digit Kode OTP</text>
+
+        <!-- Validasi OTP Timing-Safe -->
+        <rect x="820" y="200" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="225" class="fc-text">Validasi OTP via Timing-Safe Compare</text>
+
+        <!-- Decision OTP Valid? -->
+        <polygon points="980,270 1080,305 980,340 880,305" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="305" class="fc-text">OTP Cocok?</text>
+        <rect x="990" y="345" width="30" height="15" fill="#ffffff"/>
+        <text x="1005" y="353" class="fc-label">[Ya]</text>
+        <rect x="1090" y="292" width="45" height="15" fill="#ffffff"/>
+        <text x="1112" y="300" class="fc-label-no">[Tidak]</text>
+
+        <!-- Masuk Portal Siswa -->
+        <polygon points="190,360 480,360 450,410 160,410" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="385" class="fc-text">Masuk ke Portal Siswa via Kredensial</text>
+
+        <!-- Memilih Paket Ujian -->
+        <rect x="160" y="440" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="465" class="fc-text">Melihat Jadwal &amp; Memilih Paket Ujian</text>
+
+        <!-- Session Guard & Token Kamera -->
+        <rect x="820" y="440" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="465" class="fc-text">Kunci Session Guard &amp; Pairing Token HP</text>
+
+        <!-- Persiapan Lingkungan Dual-Camera -->
+        <rect x="160" y="530" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="555" class="fc-text">Kunci Fullscreen, Webcam &amp; Kamera Meja</text>
+
+        <!-- Telemetri Edge CV & HP -->
+        <rect x="820" y="530" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="555" class="fc-text">Edge CV Deteksi Wajah &amp; Telemetri HP</text>
+
+        <!-- Mengerjakan Soal Ujian -->
+        <polygon points="190,620 480,620 450,670 160,670" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="645" class="fc-text">Mengerjakan Soal &amp; Navigasi Butir Jawaban</text>
+
+        <!-- Autosave DB & Sync Server -->
+        <g transform="translate(820, 620)">
+          <path d="M 0 10 L 0 40 A 160 10 0 0 0 320 40 L 320 10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <ellipse cx="160" cy="10" rx="160" ry="10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <text x="160" y="28" class="fc-text" fill="#1e3a8a">[Autosave: IndexedDB &amp; Sync DB 30s]</text>
+        </g>
+
+        <!-- Decision Pelanggaran Fatal? -->
+        <polygon points="980,700 1080,735 980,770 880,735" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="735" class="fc-text">Pelanggaran Fatal?</text>
+        <rect x="990" y="775" width="45" height="15" fill="#ffffff"/>
+        <text x="1012" y="783" class="fc-label-no">[Ya: Gugur]</text>
+        <rect x="730" y="722" width="75" height="15" fill="#ffffff"/>
+        <text x="767" y="730" class="fc-label">[Tidak: Aman]</text>
+
+        <!-- Sesi Digugurkan (Diskualifikasi) -->
+        <rect x="820" y="800" width="320" height="50" fill="#ffffff" stroke="#b91c1c" stroke-width="1.8"/>
+        <text x="980" y="825" class="fc-text" fill="#b91c1c">Gugurkan Sesi Ujian &amp; Setel Skor 0</text>
+
+        <!-- Tampil Notifikasi Gugur -->
+        <polygon points="190,800 480,800 450,850 160,850" fill="#ffffff" stroke="#b91c1c" stroke-width="1.8"/>
+        <text x="320" y="825" class="fc-text" fill="#b91c1c">Menerima Layar Pemberitahuan Diskualifikasi</text>
+
+        <!-- Selesai Gugur -->
+        <rect x="230" y="880" width="180" height="32" rx="16" fill="#ffffff" stroke="#b91c1c" stroke-width="2"/>
+        <text x="320" y="896" class="fc-text" fill="#b91c1c">Selesai (Gugur)</text>
+
+        <!-- Mengonfirmasi Pengumpulan Lembar Ujian -->
+        <polygon points="190,920 480,920 450,970 160,970" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="945" class="fc-text">Mengonfirmasi Pengumpulan Lembar Ujian</text>
+
+        <!-- Evaluasi MCQ & Antrean Esai AI -->
+        <rect x="820" y="920" width="320" height="50" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="980" y="945" class="fc-text">Koreksi Instan MCQ &amp; AI Worker Esai</text>
+
+        <!-- Database Hasil Nilai -->
+        <g transform="translate(820, 1000)">
+          <path d="M 0 10 L 0 40 A 160 10 0 0 0 320 40 L 320 10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <ellipse cx="160" cy="10" rx="160" ry="10" fill="#f0fdf4" stroke="#000000" stroke-width="1.8"/>
+          <text x="160" y="28" class="fc-text" fill="#1e3a8a">[Database: student_submissions &amp; grades]</text>
+        </g>
+
+        <!-- Tampil Hasil Nilai & Formatif -->
+        <polygon points="190,1000 480,1000 450,1050 160,1050" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="1025" class="fc-text">Melihat Perolehan Nilai &amp; Pembahasan Formatif</text>
+
+        <!-- Render Dokumen Transkrip Siswa (Document) -->
+        <g transform="translate(820, 1090)">
+          <path d="M 0 0 L 320 0 L 320 40 Q 240 54 160 40 Q 80 26 0 40 Z" fill="#fdfdfd" stroke="#000000" stroke-width="1.8"/>
+          <text x="160" y="22" class="fc-text" font-weight="bold">[Dokumen: Transkrip Nilai Siswa PDF]</text>
+        </g>
+
+        <!-- Unduh Transkrip PDF -->
+        <polygon points="190,1110 480,1110 450,1160 160,1160" fill="#ffffff" stroke="#000000" stroke-width="1.8"/>
+        <text x="320" y="1135" class="fc-text">Mengunduh Transkrip Nilai Format PDF</text>
+
+        <!-- Selesai Ujian -->
+        <rect x="230" y="1200" width="180" height="32" rx="16" fill="#ffffff" stroke="#000000" stroke-width="2"/>
+        <text x="320" y="1216" class="fc-text">Selesai</text>
+      </svg>
+    </div>
+
+  </div>
+
+  <!-- Legend Box Baku Simbol Flowchart -->
+  <div class="legend-box">
+    <div class="legend-item">
+      <svg width="40" height="20"><rect x="2" y="2" width="36" height="16" rx="8" fill="#ffffff" stroke="#000000" stroke-width="1.5"/></svg>
+      <span>Terminator (Mulai / Selesai)</span>
+    </div>
+    <div class="legend-item">
+      <svg width="40" height="20"><rect x="2" y="2" width="36" height="16" fill="#ffffff" stroke="#000000" stroke-width="1.5"/></svg>
+      <span>Process (Proses Komputer)</span>
+    </div>
+    <div class="legend-item">
+      <svg width="40" height="20"><polygon points="8,2 38,2 32,18 2,18" fill="#ffffff" stroke="#000000" stroke-width="1.5"/></svg>
+      <span>Input / Output (Masukan Pengguna / Tampilan)</span>
+    </div>
+    <div class="legend-item">
+      <svg width="40" height="20"><polygon points="20,2 38,10 20,18 2,10" fill="#ffffff" stroke="#000000" stroke-width="1.5"/></svg>
+      <span>Decision (Keputusan Ya / Tidak)</span>
+    </div>
+    <div class="legend-item">
+      <svg width="40" height="20">
+        <path d="M 2 4 L 2 16 A 18 3 0 0 0 38 16 L 38 4" fill="#f0fdf4" stroke="#000000" stroke-width="1.5"/>
+        <ellipse cx="20" cy="4" rx="18" ry="3" fill="#f0fdf4" stroke="#000000" stroke-width="1.5"/>
+      </svg>
+      <span>Data Storage (Penyimpanan Database)</span>
+    </div>
+    <div class="legend-item">
+      <svg width="40" height="20"><path d="M 2 2 L 38 2 L 38 16 Q 28 20 20 16 Q 10 12 2 16 Z" fill="#fdfdfd" stroke="#000000" stroke-width="1.5"/></svg>
+      <span>Document (Keluaran Dokumen PDF/Cetak)</span>
+    </div>
+  </div>
+
+  <script>
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+
+      document.querySelectorAll('.diagram-panel').forEach(panel => panel.classList.remove('active'));
+      const active = document.getElementById(`tab-${tabId}`);
+      if (active) {
+        active.classList.add('active');
+      }
+    }
+
+    function showAllTabs() {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+      document.querySelectorAll('.diagram-panel').forEach(panel => panel.classList.add('active'));
+    }
+  </script>
+</body>
+</html>

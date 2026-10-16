@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EXAMIND — UML Use Case Diagram</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: #ffffff;
+      color: #000000;
+      font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+      padding: 30px 40px;
+      min-width: 1750px;
+      overflow-x: auto;
+      user-select: none;
+    }
+
+    /* Print / Header Dokumen */
+    .doc-header {
+      text-align: center;
+      margin-bottom: 24px;
+      border-bottom: 2px solid #000000;
+      padding-bottom: 12px;
+      max-width: 1680px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .doc-header h1 {
+      font-size: 20px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .doc-header p {
+      font-size: 13px;
+      color: #4b5563;
+      margin-top: 4px;
+    }
+
+    /* Outer Container */
+    .uml-stage {
+      position: relative;
+      max-width: 1680px;
+      margin: 0 auto;
+    }
+
+    /* SVG Canvas Overlay - Selalu di atas agar garis jelas dari titik awal ke titik akhir */
+    #svg-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 50;
+    }
+
+    /* Main 3-Column Diagram Grid */
+    .diagram-grid {
+      display: grid;
+      grid-template-columns: 200px 1fr 200px;
+      gap: 50px;
+      align-items: stretch;
+      position: relative;
+      z-index: 10;
+    }
+
+    /* Kolom Aktor Kiri & Kanan */
+    .actors-sidebar {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 40px 0;
+      z-index: 20;
+    }
+
+    .actor-unit {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      position: relative;
+      background: #ffffff;
+      padding: 10px 0;
+    }
+
+    /* Stickman UML Standar */
+    .stickman-svg {
+      width: 50px;
+      height: 76px;
+    }
+
+    .stickman-svg circle {
+      fill: #ffffff;
+      stroke: #000000;
+      stroke-width: 2.2;
+    }
+
+    .stickman-svg line {
+      stroke: #000000;
+      stroke-width: 2.2;
+      stroke-linecap: round;
+    }
+
+    .actor-name {
+      margin-top: 6px;
+      font-size: 13px;
+      font-weight: bold;
+      line-height: 1.25;
+      max-width: 160px;
+      color: #000000;
+    }
+
+    .actor-stereo {
+      font-size: 11px;
+      font-style: italic;
+      color: #374151;
+      margin-bottom: 2px;
+    }
+
+    /* System Boundary Persegi Standar UML */
+    .system-box {
+      border: 2px solid #000000;
+      background-color: #ffffff;
+      padding: 24px 34px 30px 34px;
+      position: relative;
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .system-label {
+      font-size: 15px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      text-align: center;
+      padding-bottom: 12px;
+      border-bottom: 1px dashed #6b7280;
+      margin-bottom: 24px;
+    }
+
+    /* Layout 2 Kolom Vertikal di dalam Boundary: KIRI (ADMIN & SISWA) vs KANAN (GURU & EVALUASI) */
+    .columns-wrap {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 60px;
+      flex: 1;
+    }
+
+    .column-zone {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .module-group {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .group-header {
+      font-size: 12px;
+      font-weight: bold;
+      color: #1f2937;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 4px 8px;
+      background: #f3f4f6;
+      border-left: 3px solid #000000;
+      margin-bottom: 4px;
+    }
+
+    /* Use Case Bentuk Elips / Oval Standar UML */
+    .usecase-oval {
+      background-color: #ffffff;
+      border: 1.8px solid #000000;
+      border-radius: 50% / 50%;
+      min-height: 50px;
+      padding: 8px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.25;
+      color: #000000;
+      position: relative;
+      z-index: 25;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    }
+
+    /* Legend Box */
+    .legend-box {
+      margin-top: 30px;
+      border: 1px solid #9ca3af;
+      padding: 10px 20px;
+      background: #fafafa;
+      display: flex;
+      justify-content: center;
+      gap: 40px;
+      font-size: 12px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .line-solid-sample {
+      width: 40px;
+      height: 1.8px;
+      background: #000000;
+    }
+
+    .line-include-sample {
+      width: 40px;
+      height: 0;
+      border-top: 2px dashed #0284c7;
+    }
+
+    .line-extend-sample {
+      width: 40px;
+      height: 0;
+      border-top: 2px dashed #d97706;
+    }
+
+    /* Toolbar Minimalis */
+    .toolbar-bar {
+      max-width: 1680px;
+      margin: 0 auto 15px auto;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    .btn-act {
+      background: #000000;
+      color: #ffffff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .btn-act:hover {
+      background: #374151;
+    }
+
+    @media print {
+      body { padding: 0; }
+      .toolbar-bar { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="toolbar-bar">
+    <button class="btn-act" onclick="window.print()">Cetak / Simpan PDF</button>
+  </div>
+
+  <header class="doc-header">
+    <h1>UML Use Case Diagram — Platform Ujian Online EXAMIND</h1>
+    <p>Standar Notasi: Object Management Group (OMG) UML 2.5</p>
+  </header>
+
+  <div class="uml-stage" id="uml-stage">
+    
+    <!-- SVG Vector Canvas: Direct Clean Lines Tanpa Overlap -->
+    <svg id="svg-canvas"></svg>
+
+    <div class="diagram-grid">
+
+      <!-- SISI KIRI: Human Actors (Super Admin, Admin Sekolah, Guru, Siswa) -->
+      <div class="actors-sidebar">
+        
+        <!-- Super Admin (1) -->
+        <div class="actor-unit" id="actor-superadmin">
+          <svg class="stickman-svg" viewBox="0 0 50 76">
+            <circle cx="25" cy="13" r="10" />
+            <line x1="25" y1="23" x2="25" y2="48" />
+            <line x1="8" y1="34" x2="42" y2="34" />
+            <line x1="25" y1="48" x2="10" y2="72" />
+            <line x1="25" y1="48" x2="40" y2="72" />
+          </svg>
+          <div class="actor-name">Super Admin</div>
+        </div>
+
+        <!-- Admin Sekolah (2) -->
+        <div class="actor-unit" id="actor-admin">
+          <svg class="stickman-svg" viewBox="0 0 50 76">
+            <circle cx="25" cy="13" r="10" />
+            <line x1="25" y1="23" x2="25" y2="48" />
+            <line x1="8" y1="34" x2="42" y2="34" />
+            <line x1="25" y1="48" x2="10" y2="72" />
+            <line x1="25" y1="48" x2="40" y2="72" />
+          </svg>
+          <div class="actor-name">Admin Sekolah</div>
+        </div>
+
+        <!-- Guru (3 - Dipindahkan ke Sisi Kiri) -->
+        <div class="actor-unit" id="actor-guru">
+          <svg class="stickman-svg" viewBox="0 0 50 76">
+            <circle cx="25" cy="13" r="10" />
+            <line x1="25" y1="23" x2="25" y2="48" />
+            <line x1="8" y1="34" x2="42" y2="34" />
+            <line x1="25" y1="48" x2="10" y2="72" />
+            <line x1="25" y1="48" x2="40" y2="72" />
+          </svg>
+          <div class="actor-name">Guru</div>
+        </div>
+
+        <!-- Siswa (4) -->
+        <div class="actor-unit" id="actor-siswa">
+          <svg class="stickman-svg" viewBox="0 0 50 76">
+            <circle cx="25" cy="13" r="10" />
+            <line x1="25" y1="23" x2="25" y2="48" />
+            <line x1="8" y1="34" x2="42" y2="34" />
+            <line x1="25" y1="48" x2="10" y2="72" />
+            <line x1="25" y1="48" x2="40" y2="72" />
+          </svg>
+          <div class="actor-name">Siswa</div>
+        </div>
+
+      </div>
+
+      <!-- TENGAH: System Boundary EXAMIND -->
+      <div class="system-box" id="system-box">
+        <div class="system-label">Platform Ujian Online EXAMIND</div>
+
+        <div class="columns-wrap">
+
+          <!-- ZONA KIRI: Use Case Administrasi & Peserta (Langsung Berhadapan dengan Aktor Kiri) -->
+          <div class="column-zone" id="zone-left">
+            
+            <div class="module-group">
+              <div class="group-header">1. Administrasi Platform & Sekolah</div>
+              <div class="usecase-oval" id="uc-login">Masuk ke Sistem</div>
+              <div class="usecase-oval" id="uc-profile">Mengelola Profil Pengguna</div>
+              <div class="usecase-oval" id="uc-global-stats">Melihat Statistik Global Platform</div>
+              <div class="usecase-oval" id="uc-manage-schools">Mengelola Data Sekolah</div>
+              <div class="usecase-oval" id="uc-manage-secrets">Mengelola Kunci API Sistem</div>
+              <div class="usecase-oval" id="uc-test-connection">Menguji Koneksi Layanan Eksternal</div>
+              <div class="usecase-oval" id="uc-school-stats">Melihat Statistik Institusi</div>
+              <div class="usecase-oval" id="uc-manage-users">Mengelola Pengguna Institusi</div>
+              <div class="usecase-oval" id="uc-manage-classes">Mengelola Data Kelas</div>
+              <div class="usecase-oval" id="uc-manage-members">Mengelola Anggota Kelas</div>
+            </div>
+
+            <div class="module-group">
+              <div class="group-header">2. Registrasi & Pelaksanaan Ujian (Siswa)</div>
+              <div class="usecase-oval" id="uc-register">Mendaftar Akun Baru</div>
+              <div class="usecase-oval" id="uc-verify-otp">Memverifikasi Email dengan OTP</div>
+              <div class="usecase-oval" id="uc-view-active-exams">Melihat Daftar Ujian Tersedia</div>
+              <div class="usecase-oval" id="uc-take-exam">Mengerjakan Ujian</div>
+              <div class="usecase-oval" id="uc-autosave">Menyimpan Jawaban Otomatis</div>
+              <div class="usecase-oval" id="uc-pair-camera">Menghubungkan Kamera Ponsel Sekunder</div>
+              <div class="usecase-oval" id="uc-submit-exam">Mengumpulkan Lembar Ujian</div>
+              <div class="usecase-oval" id="uc-view-results">Melihat Hasil Ujian Siswa</div>
+              <div class="usecase-oval" id="uc-download-pdf">Mengunduh Transkrip Nilai PDF</div>
+            </div>
+
+          </div>
+
+          <!-- ZONA KANAN: Use Case Bank Soal, Pembuatan Ujian & Proctoring -->
+          <div class="column-zone" id="zone-right">
+            
+            <div class="module-group">
+              <div class="group-header">3. Pembuatan & Pengelolaan Ujian (Guru & AI)</div>
+              <div class="usecase-oval" id="uc-manage-banks">Mengelola Bank Soal</div>
+              <div class="usecase-oval" id="uc-manual-questions">Menyusun Butir Soal Manual</div>
+              <div class="usecase-oval" id="uc-ai-generate">Membuat Soal Menggunakan AI</div>
+              <div class="usecase-oval" id="uc-extract-docs">Mengekstrak Dokumen Menjadi Soal</div>
+              <div class="usecase-oval" id="uc-ai-assistant">Berkonsultasi dengan Asisten AI</div>
+              <div class="usecase-oval" id="uc-create-exam">Membuat Paket Ujian</div>
+              <div class="usecase-oval" id="uc-allocate-questions">Mengatur Alokasi Soal Ujian</div>
+              <div class="usecase-oval" id="uc-update-exam">Memperbarui Paket Ujian</div>
+              <div class="usecase-oval" id="uc-publish-exam">Mempublikasikan Ujian</div>
+            </div>
+
+            <div class="module-group">
+              <div class="group-header">4. Proctoring, Evaluasi & Pelaporan (Guru)</div>
+              <div class="usecase-oval" id="uc-live-monitor">Mengawasi Ujian Secara Real-time</div>
+              <div class="usecase-oval" id="uc-send-warning">Mengirim Peringatan Langsung ke Siswa</div>
+              <div class="usecase-oval" id="uc-review-logs">Meninjau Log Pelanggaran Ujian</div>
+              <div class="usecase-oval" id="uc-log-violations">Mencatat Pelanggaran Integritas</div>
+              <div class="usecase-oval" id="uc-disqualify">Mendiskualifikasi Siswa dari Ujian</div>
+              <div class="usecase-oval" id="uc-auto-grade">Menilai Lembar Ujian Otomatis</div>
+              <div class="usecase-oval" id="uc-review-grades">Meninjau Hasil Penilaian Ujian</div>
+              <div class="usecase-oval" id="uc-override-grade">Mengubah Nilai Ujian Manual</div>
+              <div class="usecase-oval" id="uc-item-analysis">Menganalisis Kualitas Butir Soal</div>
+              <div class="usecase-oval" id="uc-export-excel">Mengekspor Rekap Nilai Excel</div>
+              <div class="usecase-oval" id="uc-export-minutes">Mengekspor Berita Acara Ujian PDF</div>
+            </div>
+
+          </div>
+
+        </div>
+
+        <!-- Legend Panel Standar UML -->
+        <div class="legend-box">
+          <div class="legend-item">
+            <div class="line-solid-sample"></div>
+            <span>Garis Solid: Asosiasi Aktor</span>
+          </div>
+          <div class="legend-item">
+            <div class="line-include-sample"></div>
+            <span>Garis Putus-Putus Panah Terbuka: &laquo;include&raquo;</span>
+          </div>
+          <div class="legend-item">
+            <div class="line-extend-sample"></div>
+            <span>Garis Putus-Putus Panah Terbuka: &laquo;extend&raquo;</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- SISI KANAN: External Supporting System Actors -->
+      <div class="actors-sidebar">
+        
+        <!-- Google Gemini AI (Atas Kanan) -->
+        <div class="actor-unit" id="actor-gemini" style="margin-top: 280px;">
+          <svg class="stickman-svg" viewBox="0 0 50 76">
+            <circle cx="25" cy="13" r="10" />
+            <line x1="25" y1="23" x2="25" y2="48" />
+            <line x1="8" y1="34" x2="42" y2="34" />
+            <line x1="25" y1="48" x2="10" y2="72" />
+            <line x1="25" y1="48" x2="40" y2="72" />
+          </svg>
+          <div class="actor-stereo">&laquo;system&raquo;</div>
+          <div class="actor-name">Google Gemini AI</div>
+        </div>
+
+        <!-- Layanan Email Resend (Bawah Kanan) -->
+        <div class="actor-unit" id="actor-resend" style="margin-bottom: 280px;">
+          <svg class="stickman-svg" viewBox="0 0 50 76">
+            <circle cx="25" cy="13" r="10" />
+            <line x1="25" y1="23" x2="25" y2="48" />
+            <line x1="8" y1="34" x2="42" y2="34" />
+            <line x1="25" y1="48" x2="10" y2="72" />
+            <line x1="25" y1="48" x2="40" y2="72" />
+          </svg>
+          <div class="actor-stereo">&laquo;system&raquo;</div>
+          <div class="actor-name">Layanan Email Resend</div>
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+
+  <script>
+    // Asosiasi Aktor ke Use Case
+    const associations = [
+      // Super Admin -> Zona Kiri Atas
+      { actor: 'actor-superadmin', ucs: ['uc-login', 'uc-profile', 'uc-global-stats', 'uc-manage-schools', 'uc-manage-secrets', 'uc-test-connection'] },
+      
+      // Admin Sekolah -> Zona Kiri Tengah
+      { actor: 'actor-admin', ucs: ['uc-login', 'uc-profile', 'uc-school-stats', 'uc-manage-users', 'uc-manage-classes'] },
+      
+      // Siswa -> Zona Kiri Bawah
+      { actor: 'actor-siswa', ucs: [
+        'uc-login', 'uc-register', 'uc-verify-otp', 'uc-profile', 
+        'uc-view-active-exams', 'uc-take-exam', 'uc-autosave', 'uc-pair-camera', 
+        'uc-submit-exam', 'uc-view-results', 'uc-download-pdf'
+      ]},
+
+      // Guru -> Zona Kanan (dan akses kelas di zona kiri)
+      { actor: 'actor-guru', ucs: [
+        'uc-login', 'uc-profile', 'uc-manage-classes', 'uc-manage-members', 
+        'uc-manage-banks', 'uc-manual-questions', 'uc-ai-generate', 'uc-extract-docs', 
+        'uc-ai-assistant', 'uc-create-exam', 'uc-allocate-questions', 'uc-update-exam', 
+        'uc-publish-exam', 'uc-live-monitor', 'uc-send-warning', 'uc-review-logs', 
+        'uc-review-grades', 'uc-override-grade', 'uc-item-analysis', 'uc-export-excel', 'uc-export-minutes'
+      ]},
+      
+      // Gemini AI -> Zona Kanan Tengah
+      { actor: 'actor-gemini', ucs: ['uc-ai-generate', 'uc-extract-docs', 'uc-ai-assistant', 'uc-auto-grade'] },
+
+      // Resend -> OTP
+      { actor: 'actor-resend', ucs: ['uc-verify-otp'] }
+    ];
+
+    // Relasi Antar-Use Case (include & extend)
+    const relations = [
+      { from: 'uc-register', to: 'uc-verify-otp', type: 'include' },
+      { from: 'uc-manage-classes', to: 'uc-manage-members', type: 'include' },
+      { from: 'uc-manage-banks', to: 'uc-manual-questions', type: 'include' },
+      { from: 'uc-create-exam', to: 'uc-allocate-questions', type: 'include' },
+      { from: 'uc-publish-exam', to: 'uc-allocate-questions', type: 'include' },
+      { from: 'uc-take-exam', to: 'uc-autosave', type: 'include' },
+      { from: 'uc-submit-exam', to: 'uc-auto-grade', type: 'include' },
+
+      { from: 'uc-test-connection', to: 'uc-manage-secrets', type: 'extend' },
+      { from: 'uc-extract-docs', to: 'uc-ai-generate', type: 'extend' },
+      { from: 'uc-pair-camera', to: 'uc-take-exam', type: 'extend' },
+      { from: 'uc-log-violations', to: 'uc-take-exam', type: 'extend' },
+      { from: 'uc-disqualify', to: 'uc-take-exam', type: 'extend' },
+      { from: 'uc-send-warning', to: 'uc-live-monitor', type: 'extend' },
+      { from: 'uc-review-logs', to: 'uc-live-monitor', type: 'extend' },
+      { from: 'uc-override-grade', to: 'uc-review-grades', type: 'extend' },
+      { from: 'uc-download-pdf', to: 'uc-view-results', type: 'extend' },
+      { from: 'uc-export-excel', to: 'uc-item-analysis', type: 'extend' },
+      { from: 'uc-export-minutes', to: 'uc-item-analysis', type: 'extend' }
+    ];
+
+    function drawDiagramLines() {
+      const svg = document.getElementById('svg-canvas');
+      svg.innerHTML = '';
+      const svgRect = svg.getBoundingClientRect();
+
+      // Open Arrowhead Markers
+      const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+      defs.innerHTML = `
+        <marker id="arrow-include" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <polyline points="1,2 8,5 1,8" fill="none" stroke="#0284c7" stroke-width="1.8" />
+        </marker>
+        <marker id="arrow-extend" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <polyline points="1,2 8,5 1,8" fill="none" stroke="#d97706" stroke-width="1.8" />
+        </marker>
+      `;
+      svg.appendChild(defs);
+
+      const zoneLeftEl = document.getElementById('zone-left');
+      const zoneRightEl = document.getElementById('zone-right');
+
+      // 1. Gambar Asosiasi Aktor (Garis Lurus Bersih Bebas Overlap)
+      associations.forEach(assoc => {
+        const actorEl = document.getElementById(assoc.actor);
+        if (!actorEl) return;
+        const actorRect = actorEl.getBoundingClientRect();
+
+        const isLeftActor = (assoc.actor === 'actor-superadmin' || assoc.actor === 'actor-admin' || assoc.actor === 'actor-guru' || assoc.actor === 'actor-siswa');
+
+        // Titik awal torso aktor
+        const x1 = isLeftActor ? (actorRect.right - svgRect.left) : (actorRect.left - svgRect.left);
+        const y1 = (actorRect.top + 34) - svgRect.top;
+
+        assoc.ucs.forEach(ucId => {
+          const ucEl = document.getElementById(ucId);
+          if (!ucEl) return;
+          const ucRect = ucEl.getBoundingClientRect();
+
+          const inLeftZone = zoneLeftEl.contains(ucEl);
+
+          // Sambungkan ke sisi elips yang paling dekat dan logis
+          let x2, y2;
+          if (isLeftActor) {
+            // Aktor sisi kiri (Super Admin, Admin Sekolah, Guru, Siswa)
+            if (inLeftZone) {
+              // Jika use case di zona kiri, sambungkan langsung ke sisi kiri elips
+              x2 = ucRect.left - svgRect.left;
+              y2 = ucRect.top + ucRect.height / 2 - svgRect.top;
+            } else {
+              // Jika use case di zona kanan (misal Guru mengelola bank soal, ujian, proctoring),
+              // Masuk rapi ke sisi kiri elips di zona kanan melalui koridor tengah
+              x2 = ucRect.left - svgRect.left;
+              y2 = ucRect.top + ucRect.height / 2 - svgRect.top;
+            }
+          } else {
+            // Aktor sisi kanan (Layanan Eksternal Gemini AI & Resend)
+            if (!inLeftZone) {
+              // Jika use case di zona kanan, sambungkan langsung ke sisi kanan elips
+              x2 = ucRect.right - svgRect.left;
+              y2 = ucRect.top + ucRect.height / 2 - svgRect.top;
+            } else {
+              // Jika layanan eksternal mengakses use case di zona kiri (misal: Resend kirim OTP)
+              x2 = ucRect.right - svgRect.left;
+              y2 = ucRect.top + ucRect.height / 2 - svgRect.top;
+            }
+          }
+
+          const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          line.setAttribute('x1', x1);
+          line.setAttribute('y1', y1);
+          line.setAttribute('x2', x2);
+          line.setAttribute('y2', y2);
+          line.setAttribute('stroke', '#000000');
+          line.setAttribute('stroke-width', '1.2');
+          line.setAttribute('opacity', '0.75');
+
+          svg.appendChild(line);
+        });
+      });
+
+      // 2. Gambar Relasi <<include>> dan <<extend>> Antar-Use Case
+      relations.forEach(rel => {
+        const fromEl = document.getElementById(rel.from);
+        const toEl = document.getElementById(rel.to);
+        if (!fromEl || !toEl) return;
+
+        const r1 = fromEl.getBoundingClientRect();
+        const r2 = toEl.getBoundingClientRect();
+
+        let x1, y1, x2, y2;
+        const sameZone = (zoneLeftEl.contains(fromEl) && zoneLeftEl.contains(toEl)) ||
+                         (zoneRightEl.contains(fromEl) && zoneRightEl.contains(toEl));
+
+        if (sameZone) {
+          // Dalam satu zona: hubungkan titik atas-bawah
+          if (r1.bottom <= r2.top) {
+            x1 = r1.left + r1.width / 2 - svgRect.left;
+            y1 = r1.bottom - svgRect.top;
+            x2 = r2.left + r2.width / 2 - svgRect.left;
+            y2 = r2.top - svgRect.top;
+          } else {
+            x1 = r1.left + r1.width / 2 - svgRect.left;
+            y1 = r1.top - svgRect.top;
+            x2 = r2.left + r2.width / 2 - svgRect.left;
+            y2 = r2.bottom - svgRect.top;
+          }
+        } else {
+          // Antar zona: dari sisi elips ke sisi elips seberang
+          if (r1.left < r2.left) {
+            x1 = r1.right - svgRect.left;
+            y1 = r1.top + r1.height / 2 - svgRect.top;
+            x2 = r2.left - svgRect.left;
+            y2 = r2.top + r2.height / 2 - svgRect.top;
+          } else {
+            x1 = r1.left - svgRect.left;
+            y1 = r1.top + r1.height / 2 - svgRect.top;
+            x2 = r2.right - svgRect.left;
+            y2 = r2.top + r2.height / 2 - svgRect.top;
+          }
+        }
+
+        const isInclude = rel.type === 'include';
+        const strokeColor = isInclude ? '#0284c7' : '#d97706';
+
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        const cx = (x1 + x2) / 2;
+        const cy = (y1 + y2) / 2;
+
+        let dStr = '';
+        if (sameZone) {
+          const arcOffset = 26;
+          dStr = `M ${x1} ${y1} Q ${x1 + arcOffset} ${cy}, ${x2} ${y2}`;
+        } else {
+          dStr = `M ${x1} ${y1} Q ${cx} ${cy - 12}, ${x2} ${y2}`;
+        }
+
+        path.setAttribute('d', dStr);
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', strokeColor);
+        path.setAttribute('stroke-width', '1.6');
+        path.setAttribute('stroke-dasharray', '5 4');
+        path.setAttribute('marker-end', `url(#arrow-${rel.type})`);
+
+        svg.appendChild(path);
+
+        // Badge teks label <<include>> atau <<extend>>
+        const textGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        const textX = sameZone ? (x1 + 18) : cx;
+        const textY = cy;
+
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', textX);
+        text.setAttribute('y', textY);
+        text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('font-size', '10');
+        text.setAttribute('font-family', 'Arial');
+        text.setAttribute('font-style', 'italic');
+        text.setAttribute('fill', strokeColor);
+        text.setAttribute('font-weight', 'bold');
+        text.textContent = `<<${rel.type}>>`;
+
+        const bboxWidth = 56;
+        const bboxHeight = 14;
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('x', textX - bboxWidth / 2);
+        rect.setAttribute('y', textY - 10);
+        rect.setAttribute('width', bboxWidth);
+        rect.setAttribute('height', bboxHeight);
+        rect.setAttribute('fill', '#ffffff');
+        rect.setAttribute('opacity', '0.9');
+
+        textGroup.appendChild(rect);
+        textGroup.appendChild(text);
+        svg.appendChild(textGroup);
+      });
+    }
+
+    window.addEventListener('load', () => {
+      setTimeout(drawDiagramLines, 100);
+    });
+    window.addEventListener('resize', drawDiagramLines);
+  </script>
+</body>
+</html>
