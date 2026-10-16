@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.config import settings
-from app.core.rate_limit import limiter
+from app.core.rate_limit import limiter, global_key
 from app.core.security import verify_password, create_access_token, get_password_hash
 from app.core.exceptions import AppException
 from app.core.dependencies import get_current_active_user
@@ -44,6 +44,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
 @router.post("/login", response_model=ApiResponse[TokenData])
+@limiter.limit("300/minute", key_func=global_key)
 @limiter.limit("10/minute")
 def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)):
     # Look up user by identifier (NISN/NIP/username) or email
@@ -97,6 +98,7 @@ def get_current_user_profile(current_user: User = Depends(get_current_active_use
 
 
 @router.post("/refresh", response_model=ApiResponse[TokenData])
+@limiter.limit("300/minute", key_func=global_key)
 @limiter.limit("30/minute")
 def refresh_token(request: Request, current_user: User = Depends(get_current_active_user)):
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -210,6 +212,7 @@ def verify_registration_code(request: VerifyRegistrationCodeRequest, db: Session
 
 
 @router.post("/register", response_model=ApiResponse[TokenData])
+@limiter.limit("30/minute", key_func=global_key)
 @limiter.limit("5/minute")
 def register(request: Request, payload: SchoolRegisterRequest, db: Session = Depends(get_db)):
     """Register a new student, teacher, or school admin using a provider-issued role/school code."""
@@ -356,6 +359,7 @@ def register(request: Request, payload: SchoolRegisterRequest, db: Session = Dep
 
 
 @router.post("/otp/send", response_model=ApiResponse[SendOtpResponse])
+@limiter.limit("30/minute", key_func=global_key)
 @limiter.limit("5/minute")
 async def send_otp(request: Request, payload: SendOtpRequest, db: Session = Depends(get_db)):
     """Generate a 6-digit OTP code, persist it, and send it via Resend API."""
@@ -398,6 +402,7 @@ async def send_otp(request: Request, payload: SendOtpRequest, db: Session = Depe
 
 
 @router.post("/otp/verify", response_model=ApiResponse[VerifyOtpResponse])
+@limiter.limit("60/minute", key_func=global_key)
 @limiter.limit("10/minute")
 def verify_otp(request: Request, payload: VerifyOtpRequest, db: Session = Depends(get_db)):
     """Validate 6-digit OTP and mark email as verified."""
@@ -463,6 +468,7 @@ def _mask_email(email: str) -> str:
 
 
 @router.post("/forgot-password", response_model=ApiResponse[ForgotPasswordResponse])
+@limiter.limit("30/minute", key_func=global_key)
 @limiter.limit("5/minute")
 async def forgot_password(request: Request, payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
     """
@@ -567,6 +573,7 @@ async def forgot_password(request: Request, payload: ForgotPasswordRequest, db: 
 
 
 @router.post("/verify-reset-token", response_model=ApiResponse[VerifyResetTokenResponse])
+@limiter.limit("60/minute", key_func=global_key)
 @limiter.limit("10/minute")
 def verify_reset_token(request: Request, payload: VerifyResetTokenRequest, db: Session = Depends(get_db)):
     """Verify that a given reset token or 6-digit code is valid and not expired."""
@@ -611,6 +618,7 @@ def verify_reset_token(request: Request, payload: VerifyResetTokenRequest, db: S
 
 
 @router.post("/reset-password", response_model=ApiResponse[ResetPasswordResponse])
+@limiter.limit("60/minute", key_func=global_key)
 @limiter.limit("10/minute")
 async def reset_password(request: Request, payload: ResetPasswordRequest, db: Session = Depends(get_db)):
     """Reset the user password using a verified token or 6-digit code."""

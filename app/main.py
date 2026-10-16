@@ -81,20 +81,6 @@ def health_check():
     }
 
 
-@app.get("/debug/ratelimit", include_in_schema=False)
-@limiter.limit("3/minute")
-def debug_ratelimit(request: Request):
-    from app.api.v1.endpoints import auth as auth_module
-
-    return {
-        "client_host": request.client.host if request.client else None,
-        "xff": request.headers.get("x-forwarded-for"),
-        "key_used": get_client_ip(request),
-        "login_is_wrapped": hasattr(auth_module.login, "__wrapped__"),
-        "pid": __import__("os").getpid(),
-    }
-
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app.main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG)
