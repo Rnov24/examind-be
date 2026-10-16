@@ -1,9 +1,10 @@
 from datetime import datetime, timedelta
 import secrets
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.config import settings
+from app.core.rate_limit import limiter
 from app.core.security import verify_password, create_access_token, get_password_hash
 from app.core.exceptions import AppException
 from app.core.dependencies import get_current_active_user
@@ -43,15 +44,16 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
 @router.post("/login", response_model=ApiResponse[TokenData])
-def login(request: LoginRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)):
     # Look up user by identifier (NISN/NIP/username) or email
     user = (
         db.query(User)
-        .filter((User.identifier == request.identifier) | (User.email == request.identifier))
+        .filter((User.identifier == payload.identifier) | (User.email == payload.identifier))
         .first()
     )
 
-    if not user or not verify_password(request.password, user.password_hash):
+    if not user or not verify_password(payload.password, user.password_hash):
         raise AppException(
             message="Identifier atau kata sandi tidak valid. Silakan coba lagi.",
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -95,7 +97,8 @@ def get_current_user_profile(current_user: User = Depends(get_current_active_use
 
 
 @router.post("/refresh", response_model=ApiResponse[TokenData])
-def refresh_token(current_user: User = Depends(get_current_active_user)):
+@limiter.limit("30/minute")
+def refresh_token(request: Request, current_user: User = Depends(get_current_active_user)):
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     token_payload = {
         "sub": str(current_user.id),
@@ -207,9 +210,10 @@ def verify_registration_code(request: VerifyRegistrationCodeRequest, db: Session
 
 
 @router.post("/register", response_model=ApiResponse[TokenData])
-def register(request: SchoolRegisterRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def register(request: Request, payload: SchoolRegisterRequest, db: Session = Depends(get_db)):
     """Register a new student, teacher, or school admin using a provider-issued role/school code."""
-    clean_code = request.registration_code.strip().upper() if request.registration_code else ""
+    clean_code = payload.registration_code.strip().upper() if payload.registration_code else ""
     if not clean_code:
         raise AppException(
             message="Kode pendaftaran khusus institusi sekolah wajib diisi.",
@@ -217,8 +221,8 @@ def register(request: SchoolRegisterRequest, db: Session = Depends(get_db)):
             error_code="REGISTRATION_CODE_REQUIRED",
         )
 
-    clean_identifier = request.identifier.strip()
-    clean_email = request.email.strip().lower()
+    clean_identifier = payload.identifier.strip()
+    clean_email = payload.email.strip().lower()
 
     if not clean_identifier or not clean_email:
         raise AppException(
@@ -227,14 +231,14 @@ def register(request: SchoolRegisterRequest, db: Session = Depends(get_db)):
             error_code="MISSING_CREDENTIALS",
         )
 
-    if len(request.password) < 6:
+    if len(payload.password) < 6:
         raise AppException(
             message="Kata sandi minimal harus terdiri dari 6 karakter.",
             status_code=status.HTTP_400_BAD_REQUEST,
             error_code="PASSWORD_TOO_SHORT",
         )
 
-    if request.confirm_password and request.password != request.confirm_password:
+    if payload.confirm_password and payload.password != payload.confirm_password:
         raise AppException(
             message="Konfirmasi kata sandi tidak cocok dengan kata sandi yang dimasukkan.",
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -274,10 +278,10 @@ def register(request: SchoolRegisterRequest, db: Session = Depends(get_db)):
         )
 
     # Verify role match if specified
-    if request.role and request.role != reg_code.role:
+    if payload.role and payload.role != reg_code.role:
         role_map = {"admin": "Admin Sekolah", "teacher": "Guru", "student": "Siswa"}
         expected = role_map.get(reg_code.role, reg_code.role)
-        actual = role_map.get(request.role, request.role)
+        actual = role_map.get(payload.role, payload.role)
         raise AppException(
             message=f"Kode pendaftaran ini dialokasikan untuk peran {expected}, bukan {actual}.",
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -285,7 +289,7 @@ def register(request: SchoolRegisterRequest, db: Session = Depends(get_db)):
         )
 
     # Verify tenant match if specified
-    if request.tenant_id and request.tenant_id != reg_code.tenant_id:
+    if payload.tenant_id and payload.tenant_id != reg_code.tenant_id:
         raise AppException(
             message="Kode pendaftaran tidak cocok dengan sekolah yang Anda pilih.",
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -309,11 +313,11 @@ def register(request: SchoolRegisterRequest, db: Session = Depends(get_db)):
     new_user = User(
         identifier=clean_identifier,
         email=clean_email,
-        password_hash=get_password_hash(request.password),
-        full_name=request.full_name.strip(),
+        password_hash=get_password_hash(payload.password),
+        full_name=payload.full_name.strip(),
         role=reg_code.role,
         tenant_id=reg_code.tenant_id,
-        avatar_url=request.avatar_url,
+        avatar_url=payload.avatar_url,
         is_active=True,
         is_email_verified=True,
     )
@@ -352,12 +356,13 @@ def register(request: SchoolRegisterRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/otp/send", response_model=ApiResponse[SendOtpResponse])
-async def send_otp(request: SendOtpRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def send_otp(request: Request, payload: SendOtpRequest, db: Session = Depends(get_db)):
     """Generate a 6-digit OTP code, persist it, and send it via Resend API."""
     # Invalidate previous unused codes for the same email and purpose
     db.query(EmailVerification).filter(
-        EmailVerification.email == request.email,
-        EmailVerification.purpose == request.purpose,
+        EmailVerification.email == payload.email,
+        EmailVerification.purpose == payload.purpose,
         EmailVerification.is_used == False,
     ).update({"is_used": True})
 
@@ -366,9 +371,9 @@ async def send_otp(request: SendOtpRequest, db: Session = Depends(get_db)):
     expires_at = datetime.utcnow() + timedelta(minutes=expires_in_minutes)
 
     verification = EmailVerification(
-        email=str(request.email),
+        email=str(payload.email),
         otp_code=otp_code,
-        purpose=request.purpose,
+        purpose=payload.purpose,
         expires_at=expires_at,
         is_used=False,
     )
@@ -377,23 +382,24 @@ async def send_otp(request: SendOtpRequest, db: Session = Depends(get_db)):
 
     # Send email via Resend API (or mock fallback if unconfigured)
     await send_otp_email(
-        to_email=str(request.email),
+        to_email=str(payload.email),
         otp_code=otp_code,
-        purpose=request.purpose,
+        purpose=payload.purpose,
         expires_in_minutes=expires_in_minutes,
     )
 
     response_data = SendOtpResponse(
         success=True,
-        message=f"Kode OTP berhasil dikirim ke {request.email}",
-        email=str(request.email),
+        message=f"Kode OTP berhasil dikirim ke {payload.email}",
+        email=str(payload.email),
         expires_in_minutes=expires_in_minutes,
     )
     return ApiResponse.ok(data=response_data, message="Kode verifikasi OTP berhasil dikirim")
 
 
 @router.post("/otp/verify", response_model=ApiResponse[VerifyOtpResponse])
-def verify_otp(request: VerifyOtpRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def verify_otp(request: Request, payload: VerifyOtpRequest, db: Session = Depends(get_db)):
     """Validate 6-digit OTP and mark email as verified."""
     now = datetime.utcnow()
 
@@ -401,8 +407,8 @@ def verify_otp(request: VerifyOtpRequest, db: Session = Depends(get_db)):
     verification = (
         db.query(EmailVerification)
         .filter(
-            EmailVerification.email == request.email,
-            EmailVerification.purpose == request.purpose,
+            EmailVerification.email == payload.email,
+            EmailVerification.purpose == payload.purpose,
             EmailVerification.is_used == False,
             EmailVerification.expires_at > now,
         )
@@ -418,7 +424,7 @@ def verify_otp(request: VerifyOtpRequest, db: Session = Depends(get_db)):
         )
 
     # Timing-safe comparison of OTP codes
-    if not secrets.compare_digest(verification.otp_code.strip(), request.otp_code.strip()):
+    if not secrets.compare_digest(verification.otp_code.strip(), payload.otp_code.strip()):
         raise AppException(
             message="Kode OTP yang Anda masukkan salah.",
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -429,7 +435,7 @@ def verify_otp(request: VerifyOtpRequest, db: Session = Depends(get_db)):
     verification.is_used = True
 
     # If matching user exists in system, mark their email as verified
-    user = db.query(User).filter(User.email == request.email).first()
+    user = db.query(User).filter(User.email == payload.email).first()
     if user:
         user.is_email_verified = True
 
@@ -438,7 +444,7 @@ def verify_otp(request: VerifyOtpRequest, db: Session = Depends(get_db)):
     response_data = VerifyOtpResponse(
         success=True,
         message="Verifikasi email berhasil diverifikasi.",
-        email=str(request.email),
+        email=str(payload.email),
         is_email_verified=True,
     )
     return ApiResponse.ok(data=response_data, message="Email berhasil diverifikasi")
@@ -457,13 +463,14 @@ def _mask_email(email: str) -> str:
 
 
 @router.post("/forgot-password", response_model=ApiResponse[ForgotPasswordResponse])
-async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def forgot_password(request: Request, payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
     """
     Handle forgot password requests:
     Generates a secure 32-byte reset token and a 6-digit OTP code,
     persists both in email_verifications table, and dispatches email via Resend API.
     """
-    clean_identifier = request.identifier.strip()
+    clean_identifier = payload.identifier.strip()
     if not clean_identifier:
         raise AppException(
             message="Mohon masukkan email, NISN, atau NIP akun Anda.",
@@ -560,9 +567,10 @@ async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(
 
 
 @router.post("/verify-reset-token", response_model=ApiResponse[VerifyResetTokenResponse])
-def verify_reset_token(request: VerifyResetTokenRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def verify_reset_token(request: Request, payload: VerifyResetTokenRequest, db: Session = Depends(get_db)):
     """Verify that a given reset token or 6-digit code is valid and not expired."""
-    clean_token = request.token.strip()
+    clean_token = payload.token.strip()
     if not clean_token:
         raise AppException(
             message="Token reset kata sandi tidak boleh kosong.",
@@ -578,8 +586,8 @@ def verify_reset_token(request: VerifyResetTokenRequest, db: Session = Depends(g
         EmailVerification.expires_at > now,
     )
 
-    if request.email:
-        query = query.filter(EmailVerification.email == request.email.strip().lower())
+    if payload.email:
+        query = query.filter(EmailVerification.email == payload.email.strip().lower())
 
     verification = query.order_by(EmailVerification.id.desc()).first()
 
@@ -603,9 +611,10 @@ def verify_reset_token(request: VerifyResetTokenRequest, db: Session = Depends(g
 
 
 @router.post("/reset-password", response_model=ApiResponse[ResetPasswordResponse])
-async def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+async def reset_password(request: Request, payload: ResetPasswordRequest, db: Session = Depends(get_db)):
     """Reset the user password using a verified token or 6-digit code."""
-    clean_token = request.token.strip()
+    clean_token = payload.token.strip()
     if not clean_token:
         raise AppException(
             message="Token reset kata sandi tidak boleh kosong.",
@@ -613,14 +622,14 @@ async def reset_password(request: ResetPasswordRequest, db: Session = Depends(ge
             error_code="EMPTY_TOKEN",
         )
 
-    if len(request.new_password) < 6:
+    if len(payload.new_password) < 6:
         raise AppException(
             message="Kata sandi baru minimal harus terdiri dari 6 karakter.",
             status_code=status.HTTP_400_BAD_REQUEST,
             error_code="PASSWORD_TOO_SHORT",
         )
 
-    if request.new_password != request.confirm_password:
+    if payload.new_password != payload.confirm_password:
         raise AppException(
             message="Konfirmasi kata sandi tidak sesuai dengan kata sandi baru.",
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -635,8 +644,8 @@ async def reset_password(request: ResetPasswordRequest, db: Session = Depends(ge
         EmailVerification.expires_at > now,
     )
 
-    if request.email:
-        query = query.filter(EmailVerification.email == request.email.strip().lower())
+    if payload.email:
+        query = query.filter(EmailVerification.email == payload.email.strip().lower())
 
     verification = query.order_by(EmailVerification.id.desc()).first()
 
@@ -656,7 +665,7 @@ async def reset_password(request: ResetPasswordRequest, db: Session = Depends(ge
         )
 
     # Update password hash
-    user.password_hash = get_password_hash(request.new_password)
+    user.password_hash = get_password_hash(payload.new_password)
 
     # Invalidate all reset tokens for this user email
     db.query(EmailVerification).filter(

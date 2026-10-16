@@ -3,9 +3,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import settings
+from app.core.rate_limit import limiter
 from app.core.exceptions import (
     AppException,
     app_exception_handler,
@@ -35,6 +39,23 @@ app.add_middleware(
 )
 
 # Register Custom & Global Exception Handlers
+app.state.limiter = limiter
+
+
+async def rate_limit_handler(request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(
+        status_code=429,
+        content={
+            "success": False,
+            "data": None,
+            "message": "Terlalu banyak permintaan. Tunggu sebentar lalu coba lagi.",
+            "error": {"code": "RATE_LIMITED", "details": str(exc.detail)},
+        },
+        headers={"Retry-After": "60"},
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
 app.add_exception_handler(AppException, app_exception_handler)
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
