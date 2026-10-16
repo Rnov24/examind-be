@@ -23,6 +23,9 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str = "mysql+pymysql://root:@localhost:3306/examind"
+    # Optional explicit CA bundle path for TLS MySQL (e.g. TiDB Cloud).
+    # Auto-enabled for *.tidbcloud.com hosts using certifi's bundle.
+    DB_SSL_CA: str = ""
 
     # Security / JWT — never ship the dev default to production
     SECRET_KEY: str = "examind_dev_only_change_in_production"

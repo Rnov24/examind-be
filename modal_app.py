@@ -30,6 +30,7 @@ app = modal.App("examind-be")
 
 @app.function(
     image=image,
+    mounts=[modal.Mount.from_local_dir(".", remote_path="/root/examind-be")],
     secrets=[modal.Secret.from_name("examind-env")],
     scaledown_window=300,  # keep warm 5 min after last request; raise on exam days
     timeout=600,
@@ -37,6 +38,9 @@ app = modal.App("examind-be")
 @modal.concurrent(max_inputs=100)  # many simultaneous WS proctoring connections
 @modal.asgi_app()
 def api():
+    import sys
+
+    sys.path.insert(0, "/root/examind-be")
     from app.main import app as fastapi_app
 
     return fastapi_app
