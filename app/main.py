@@ -91,6 +91,7 @@ def debug_ratelimit(request: Request):
         "xff": request.headers.get("x-forwarded-for"),
         "key_used": get_client_ip(request),
         "login_is_wrapped": hasattr(auth_module.login, "__wrapped__"),
+        "pid": __import__("os").getpid(),
     }
 
 
