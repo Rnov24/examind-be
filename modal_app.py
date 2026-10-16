@@ -23,7 +23,9 @@ import modal
 image = (
     modal.Image.debian_slim()
     .pip_install_from_requirements("requirements.txt")
-    .add_local_dir(".", remote_path="/root/examind-be")
+    # copy=True: bake code into the image so every deploy serves fresh code.
+    # (Without it, Modal caches the image and warm containers keep serving stale files.)
+    .add_local_dir(".", remote_path="/root/examind-be", copy=True)
 )
 
 app = modal.App("examind-be")

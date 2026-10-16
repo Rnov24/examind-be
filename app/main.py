@@ -76,7 +76,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "EXAMIND Backend API",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "environment": settings.ENVIRONMENT,
     }
 
