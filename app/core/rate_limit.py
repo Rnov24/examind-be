@@ -23,8 +23,11 @@ def get_client_ip(request: Request) -> str:
 
 
 # ~10 req/s per IP sustained — floods get 429s, normal exam traffic unaffected.
+# headers_enabled=False: our endpoints return ApiResponse models (not starlette
+# Response), and slowapi's header injection crashes on those. Limiting itself
+# is unaffected; the 429 handler sets Retry-After manually.
 limiter = Limiter(
     key_func=get_client_ip,
     default_limits=["600 per minute"],
-    headers_enabled=True,  # X-RateLimit-* response headers
+    headers_enabled=False,
 )
