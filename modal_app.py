@@ -46,3 +46,28 @@ def api():
     from app.main import app as fastapi_app
 
     return fastapi_app
+
+
+@app.function(
+    image=image,
+    secrets=[modal.Secret.from_name("examind-env"), modal.Secret.from_name("examind-edge")],
+    schedule=modal.Cron("0 0 * * *"),  # 07:00 WIB daily
+    timeout=300,
+)
+def subscription_reminder_cron():
+    """Daily subscription due-date check: sends warning emails, flips past-due tenants."""
+    import sys
+
+    sys.path.insert(0, "/root/examind-be")
+    import asyncio
+    from app.core.database import SessionLocal
+    from app.services.billing.subscription_reminders import check_and_send_reminders
+
+    db = SessionLocal()
+    try:
+        result = asyncio.run(check_and_send_reminders(db))
+        print(f"[subscription-reminders] {result}")
+    except Exception as e:
+        print(f"[subscription-reminders] FAILED: {e}")
+    finally:
+        db.close()

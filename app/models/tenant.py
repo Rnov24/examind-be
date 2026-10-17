@@ -27,12 +27,27 @@ class Tenant(Base):
     ai_credits_monthly = Column(Integer, default=1000, nullable=False)
     ai_credits_used = Column(Integer, default=0, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    subscription_due_date = Column(DateTime, nullable=True)
+    grace_period_ends = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
     users = relationship("User", back_populates="tenant", cascade="all, delete-orphan")
     registration_codes = relationship("TenantRegistrationCode", back_populates="tenant", cascade="all, delete-orphan")
+    reminder_logs = relationship("SubscriptionReminderLog", back_populates="tenant", cascade="all, delete-orphan")
+
+
+class SubscriptionReminderLog(Base):
+    __tablename__ = "subscription_reminders_log"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    stage = Column(String(50), nullable=False, index=True)
+    sent_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    tenant = relationship("Tenant", back_populates="reminder_logs")
 
 
 class TenantRegistrationCode(Base):

@@ -16,6 +16,8 @@ class TenantResponse(BaseModel):
     ai_credits_monthly: int
     ai_credits_used: int
     is_active: bool
+    subscription_due_date: Optional[datetime] = None
+    grace_period_ends: Optional[datetime] = None
     created_at: Optional[datetime] = None
     total_users: int = 0
     total_students: int = 0
@@ -33,6 +35,8 @@ class TenantCreate(BaseModel):
     max_students: int = 500
     max_teachers: int = 50
     ai_credits_monthly: int = 1000
+    subscription_due_date: Optional[datetime] = None
+    grace_period_ends: Optional[datetime] = None
     # Optional initial school administrator
     admin_identifier: Optional[str] = None
     admin_email: Optional[str] = None
@@ -49,6 +53,8 @@ class TenantUpdate(BaseModel):
     max_teachers: Optional[int] = None
     ai_credits_monthly: Optional[int] = None
     is_active: Optional[bool] = None
+    subscription_due_date: Optional[datetime] = None
+    grace_period_ends: Optional[datetime] = None
 
 
 class SuperAdminStatsResponse(BaseModel):

@@ -1,4 +1,6 @@
 import time
+import calendar
+from datetime import datetime, timedelta
 import httpx
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, status
@@ -127,6 +129,8 @@ def get_all_tenants(
             ai_credits_monthly=t.ai_credits_monthly,
             ai_credits_used=t.ai_credits_used,
             is_active=t.is_active,
+            subscription_due_date=t.subscription_due_date,
+            grace_period_ends=t.grace_period_ends,
             created_at=t.created_at,
             total_users=t_user_stat["total"],
             total_students=t_user_stat["student"],
@@ -166,6 +170,10 @@ def create_tenant(
         max_tea = max_tea or 200
         ai_credits = ai_credits or 5000
 
+    now = datetime.utcnow()
+    due_date = payload.subscription_due_date or (now + timedelta(days=30))
+    grace_ends = payload.grace_period_ends or (due_date + timedelta(days=7))
+
     new_tenant = Tenant(
         name=payload.name,
         code=payload.code,
@@ -177,6 +185,9 @@ def create_tenant(
         ai_credits_monthly=ai_credits,
         ai_credits_used=0,
         is_active=True,
+        created_at=now,
+        subscription_due_date=due_date,
+        grace_period_ends=grace_ends,
     )
     db.add(new_tenant)
     db.commit()
@@ -209,6 +220,8 @@ def create_tenant(
         ai_credits_monthly=new_tenant.ai_credits_monthly,
         ai_credits_used=new_tenant.ai_credits_used,
         is_active=new_tenant.is_active,
+        subscription_due_date=new_tenant.subscription_due_date,
+        grace_period_ends=new_tenant.grace_period_ends,
         created_at=new_tenant.created_at,
         total_users=1 if payload.admin_identifier else 0,
         total_students=0,
@@ -250,6 +263,8 @@ def get_tenant_detail(
         ai_credits_monthly=tenant.ai_credits_monthly,
         ai_credits_used=tenant.ai_credits_used,
         is_active=tenant.is_active,
+        subscription_due_date=tenant.subscription_due_date,
+        grace_period_ends=tenant.grace_period_ends,
         created_at=tenant.created_at,
         total_users=len(t_users),
         total_students=t_students,
@@ -290,6 +305,10 @@ def update_tenant(
         tenant.ai_credits_monthly = payload.ai_credits_monthly
     if payload.is_active is not None:
         tenant.is_active = payload.is_active
+    if payload.subscription_due_date is not None:
+        tenant.subscription_due_date = payload.subscription_due_date
+    if payload.grace_period_ends is not None:
+        tenant.grace_period_ends = payload.grace_period_ends
 
     db.commit()
     db.refresh(tenant)
@@ -308,6 +327,8 @@ def update_tenant(
         ai_credits_monthly=tenant.ai_credits_monthly,
         ai_credits_used=tenant.ai_credits_used,
         is_active=tenant.is_active,
+        subscription_due_date=tenant.subscription_due_date,
+        grace_period_ends=tenant.grace_period_ends,
         created_at=tenant.created_at,
         total_users=len(t_users),
         total_students=sum(1 for u in t_users if u.role == "student"),
@@ -349,6 +370,8 @@ def toggle_tenant_status(
         ai_credits_monthly=tenant.ai_credits_monthly,
         ai_credits_used=tenant.ai_credits_used,
         is_active=tenant.is_active,
+        subscription_due_date=tenant.subscription_due_date,
+        grace_period_ends=tenant.grace_period_ends,
         created_at=tenant.created_at,
         total_users=len(t_users),
         total_students=sum(1 for u in t_users if u.role == "student"),
@@ -677,6 +700,9 @@ async def test_secret_connection(
 # FINANCE, MRR & SAAS REVENUE ENDPOINTS
 # ---------------------------------------------------------------------------
 
+INDONESIAN_MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
+
+
 @router.get("/finance")
 def get_superadmin_finance_analytics(
     db: Session = Depends(get_db),
@@ -707,31 +733,103 @@ def get_superadmin_finance_analytics(
     active_count = sum(1 for t in tenants if t.is_active)
     arpu = (mrr // active_count) if active_count > 0 else 0
 
-    # Historical 6-Month MRR trend
-    mrr_history = [
-        {"month": "Mei 2026", "mrr": max(0, int(mrr * 0.65)), "schools": max(1, active_count - 2)},
-        {"month": "Jun 2026", "mrr": max(0, int(mrr * 0.72)), "schools": max(1, active_count - 2)},
-        {"month": "Jul 2026", "mrr": max(0, int(mrr * 0.80)), "schools": max(1, active_count - 1)},
-        {"month": "Agu 2026", "mrr": max(0, int(mrr * 0.88)), "schools": max(1, active_count - 1)},
-        {"month": "Sep 2026", "mrr": max(0, int(mrr * 0.94)), "schools": active_count},
-        {"month": "Okt 2026", "mrr": mrr, "schools": active_count},
-    ]
+    now = datetime.utcnow()
 
-    # Invoices / Transactions
+    # Real Historical 6-Month MRR trend from REAL Tenant.created_at dates
+    mrr_history = []
+    prev_month_mrr = 0
+
+    for offset in range(5, -1, -1):
+        total_months = now.year * 12 + (now.month - 1) - offset
+        y = total_months // 12
+        m = (total_months % 12) + 1
+        last_day = calendar.monthrange(y, m)[1]
+        month_end = datetime(y, m, last_day, 23, 59, 59, 999999)
+        month_label = f"{INDONESIAN_MONTHS[m - 1]} {y}"
+
+        month_mrr = 0
+        month_schools = 0
+        for t in tenants:
+            if not t.created_at:
+                continue
+            t_created = t.created_at.replace(tzinfo=None) if t.created_at.tzinfo else t.created_at
+            if t_created <= month_end:
+                if t.is_active and t.subscription_status in ("active", "trial"):
+                    price = PLAN_PRICES.get(t.subscription_plan, 3500000)
+                    month_mrr += price
+                    month_schools += 1
+
+        if offset == 5 or prev_month_mrr == 0:
+            growth_str = "+100%" if month_mrr > 0 and offset < 5 else "0%"
+        else:
+            diff_pct = round(((month_mrr - prev_month_mrr) / prev_month_mrr) * 100)
+            growth_str = f"+{diff_pct}%" if diff_pct >= 0 else f"{diff_pct}%"
+
+        prev_month_mrr = month_mrr
+
+        mrr_history.append({
+            "month": month_label,
+            "mrr": month_mrr,
+            "schools": month_schools,
+            "tenants": month_schools,
+            "growth": growth_str,
+        })
+
+    # Honest Invoices / Transactions derived directly from real tenant records
     recent_invoices = []
-    for idx, t in enumerate(tenants):
+    sorted_tenants = sorted(
+        tenants,
+        key=lambda x: (x.created_at.replace(tzinfo=None) if (x.created_at and x.created_at.tzinfo) else x.created_at) or datetime.min,
+        reverse=True,
+    )
+    for t in sorted_tenants:
         price = PLAN_PRICES.get(t.subscription_plan, 3500000)
+        t_created = t.created_at.replace(tzinfo=None) if (t.created_at and t.created_at.tzinfo) else t.created_at
+
+        if t_created:
+            inv_id = f"INV-{t_created.strftime('%Y-%m')}-{1000 + t.id}"
+            period = f"{INDONESIAN_MONTHS[t_created.month - 1]} {t_created.year}"
+            date_str = f"{t_created.strftime('%d')} {INDONESIAN_MONTHS[t_created.month - 1]} {t_created.year}"
+        else:
+            inv_id = f"INV-{1000 + t.id}"
+            period = "-"
+            date_str = "-"
+
+        status = "paid" if (t.is_active and t.subscription_status in ("active", "trial")) else "past_due"
+
         recent_invoices.append({
-            "id": f"INV-2026-10-{1000 + t.id}",
+            "id": inv_id,
             "tenant_id": t.id,
             "tenant_name": t.name,
-            "plan": t.subscription_plan.upper(),
+            "code": t.code,
+            "plan": (t.subscription_plan or "pro").upper(),
             "amount": price,
-            "period": "Okt 2026 - Nov 2026",
-            "status": "paid" if t.is_active else "past_due",
-            "payment_method": "BCA Virtual Account",
-            "date": t.created_at.strftime("%d %b %Y") if t.created_at else "16 Okt 2026",
+            "period": period,
+            "status": status,
+            "payment_method": "-",
+            "date": date_str,
         })
+
+    plans_breakdown = {}
+    total_rev = mrr if mrr > 0 else 1
+    for plan_key in ("starter", "pro", "enterprise"):
+        subtotal = plan_revenue.get(plan_key, 0)
+        cnt = plan_distribution.get(plan_key, 0)
+        pct = round((subtotal / total_rev) * 100) if mrr > 0 else 0
+        plans_breakdown[plan_key] = {
+            "count": cnt,
+            "subtotal": subtotal,
+            "percentage": pct,
+        }
+
+    # Honest MoM Growth Rate from real MRR history
+    if len(mrr_history) >= 2 and mrr_history[-2]["mrr"] > 0:
+        prev_mrr = mrr_history[-2]["mrr"]
+        growth_rate_mom = round(((mrr - prev_mrr) / prev_mrr) * 100, 1)
+    elif mrr > 0:
+        growth_rate_mom = 100.0
+    else:
+        growth_rate_mom = 0.0
 
     return ApiResponse.ok(
         data={
@@ -739,11 +837,15 @@ def get_superadmin_finance_analytics(
             "arr": arr,
             "arpu": arpu,
             "active_tenants": active_count,
-            "growth_rate_mom": 12.5,
+            "paying_tenants": active_count,
+            "growth_rate_mom": growth_rate_mom,
             "churn_rate": 0.0,
             "plan_revenue": plan_revenue,
             "plan_distribution": plan_distribution,
+            "plans_breakdown": plans_breakdown,
             "mrr_history": mrr_history,
+            "historical_mrr": mrr_history,
+            "recent_invoices": recent_invoices,
             "invoices": recent_invoices,
         },
         message="Data finansial SaaS dan MRR berhasil dimuat",

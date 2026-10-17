@@ -4,6 +4,7 @@ import base64
 import secrets
 import string
 import logging
+from datetime import datetime
 import httpx
 from app.core.config import settings
 
@@ -377,4 +378,184 @@ async def send_exam_result_email(
         html_content=html_content,
         attachments=attachments,
     )
+
+
+def render_subscription_reminder_html(
+    tenant_name: str,
+    stage: str,
+    due_date: datetime,
+    grace_period_ends: datetime | None = None,
+    plan_name: str = "Pro",
+    admin_name: str | None = None,
+    platform_url: str | None = None,
+    portal_url: str | None = None,
+) -> str:
+    """Render high-aesthetic, branded HTML template for EXAMIND Subscription Reminders."""
+    display_admin = admin_name.strip() if admin_name else "Administrator Sekolah"
+    clean_tenant_name = tenant_name.strip() if tenant_name else "Institusi Sekolah"
+    clean_plan = (plan_name or "Pro").upper()
+    active_portal_url = portal_url or platform_url or getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+
+    id_months = (
+        "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+        "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+    )
+
+    def _format_date(dt: datetime | None) -> str:
+        if not dt:
+            return "-"
+        return f"{dt.day} {id_months[dt.month]} {dt.year}"
+
+    formatted_due = _format_date(due_date)
+    formatted_grace = _format_date(grace_period_ends) if grace_period_ends else "-"
+
+    stage_configs = {
+        "due_in_7": {
+            "title": f"Pengingat Masa Aktif Langganan: {clean_tenant_name} - EXAMIND",
+            "heading": "Masa Aktif Langganan Berakhir dalam 7 Hari",
+            "badge_text": "7 Hari Tersisa",
+            "badge_bg": "#ede9fe",
+            "badge_color": "#6a5fc1",
+            "message": f"Masa aktif langganan EXAMIND untuk institusi <strong>{clean_tenant_name}</strong> akan berakhir dalam 7 hari pada <strong>{formatted_due}</strong>. Harap segera lakukan perpanjangan agar seluruh operasional ujian, bank soal, dan evaluasi berbasis AI tetap berjalan lancar tanpa kendala.",
+        },
+        "due_in_3": {
+            "title": f"Peringatan Masa Aktif Langganan: {clean_tenant_name} - EXAMIND",
+            "heading": "Masa Aktif Langganan Berakhir dalam 3 Hari",
+            "badge_text": "3 Hari Tersisa",
+            "badge_bg": "#fef3c7",
+            "badge_color": "#92400e",
+            "message": f"Masa aktif paket langganan EXAMIND untuk <strong>{clean_tenant_name}</strong> tersisa 3 hari lagi dan akan jatuh tempo pada <strong>{formatted_due}</strong>. Segera selesaikan administrasi perpanjangan untuk mencegah pembatasan akses pembuatan soal dan pelaksanaan ujian.",
+        },
+        "due_today": {
+            "title": f"Batas Waktu Langganan Hari Ini: {clean_tenant_name} - EXAMIND",
+            "heading": "Masa Aktif Langganan Berakhir Hari Ini",
+            "badge_text": "Jatuh Tempo Hari Ini",
+            "badge_bg": "#fee2e2",
+            "badge_color": "#991b1b",
+            "message": f"Hari ini (<strong>{formatted_due}</strong>) merupakan batas akhir masa aktif langganan EXAMIND institusi <strong>{clean_tenant_name}</strong>. Mohon segera lakukan konfirmasi atau pembayaran perpanjangan hari ini agar fitur evaluasi dan akses ujian tetap aktif.",
+        },
+        "grace_period": {
+            "title": f"Masa Tenggang Langganan: {clean_tenant_name} - EXAMIND",
+            "heading": "Langganan Memasuki Masa Tenggang (Grace Period)",
+            "badge_text": "Masa Tenggang Aktif",
+            "badge_bg": "#fee2e2",
+            "badge_color": "#991b1b",
+            "message": f"Langganan EXAMIND institusi <strong>{clean_tenant_name}</strong> telah melewati tanggal jatuh tempo ({formatted_due}). Akun institusi Anda saat ini berada dalam masa tenggang hingga <strong>{formatted_grace}</strong>. Layanan akan ditangguhkan jika perpanjangan belum dilakukan setelah batas masa tenggang berakhir.",
+        },
+        "expired": {
+            "title": f"Masa Tenggang Berakhir: {clean_tenant_name} - EXAMIND",
+            "heading": "Masa Tenggang Berakhir - Status Past Due",
+            "badge_text": "Status: Past Due",
+            "badge_bg": "#fee2e2",
+            "badge_color": "#991b1b",
+            "message": f"Masa tenggang untuk institusi <strong>{clean_tenant_name}</strong> telah berakhir pada <strong>{formatted_grace}</strong>. Status langganan kini telah dialihkan ke past due. Silakan hubungi administrator platform untuk menyelesaikan pembayaran dan memulihkan akses layanan.",
+        },
+    }
+
+    cfg = stage_configs.get(
+        stage,
+        stage_configs["due_in_7"]
+    )
+
+    grace_row = ""
+    if grace_period_ends and stage in ("grace_period", "expired"):
+        grace_row = f"""<tr>
+          <td style="padding: 8px 0; font-size: 13px; color: #71717a; border-top: 1px solid #f4f4f5;">Batas Masa Tenggang</td>
+          <td style="padding: 8px 0; font-size: 13px; font-weight: 600; color: #991b1b; text-align: right; border-top: 1px solid #f4f4f5;">{formatted_grace}</td>
+        </tr>"""
+
+    body_html = f"""<h1 style="margin: 0 0 12px 0; font-size: 20px; font-weight: 700; color: #150f23;">{cfg["heading"]}</h1>
+<p style="margin: 0 0 16px 0; font-size: 14px; line-height: 1.6; color: #3f3f46;">
+  Halo <strong>{display_admin}</strong>,
+</p>
+<p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.6; color: #3f3f46;">
+  {cfg["message"]}
+</p>
+
+<!-- Subscription Details Card -->
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin: 20px 0; border: 1px solid #e4e4e7; border-radius: 8px; overflow: hidden;">
+  <tr>
+    <td style="padding: 14px 20px; background-color: #fafafa; border-bottom: 1px solid #e4e4e7;">
+      <span style="display: inline-block; padding: 4px 10px; border-radius: 4px; background-color: {cfg["badge_bg"]}; color: {cfg["badge_color"]}; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;">
+        {cfg["badge_text"]}
+      </span>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding: 20px; background-color: #ffffff;">
+      <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+        <tr>
+          <td style="padding: 6px 0; font-size: 13px; color: #71717a; width: 45%;">Institusi / Sekolah</td>
+          <td style="padding: 6px 0; font-size: 13px; font-weight: 600; color: #18181b; text-align: right;">{clean_tenant_name}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; font-size: 13px; color: #71717a;">Paket Langganan</td>
+          <td style="padding: 6px 0; font-size: 13px; font-weight: 600; color: #18181b; text-align: right;">{clean_plan}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; font-size: 13px; color: #71717a;">Tanggal Jatuh Tempo</td>
+          <td style="padding: 6px 0; font-size: 13px; font-weight: 600; color: #18181b; text-align: right;">{formatted_due}</td>
+        </tr>
+        {grace_row}
+      </table>
+    </td>
+  </tr>
+</table>
+
+<!-- Action Button -->
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" style="margin: 24px 0;">
+  <tr>
+    <td align="center" style="background-color: #150f23; border-radius: 6px;">
+      <a href="{active_portal_url}" target="_blank" style="display: inline-block; padding: 12px 24px; font-size: 14px; font-weight: 600; color: #ffffff; text-decoration: none;">Kelola Langganan di EXAMIND</a>
+    </td>
+  </tr>
+</table>
+
+<p style="margin: 16px 0 0 0; font-size: 12px; line-height: 1.5; color: #71717a; border-top: 1px solid #f4f4f5; padding-top: 16px;">
+  Jika Anda telah melakukan pembayaran perpanjangan, silakan abaikan email ini atau periksa status akun Anda di portal utama.
+</p>"""
+
+    return _email_shell(title=cfg["title"], body_html=body_html)
+
+
+async def send_subscription_reminder_email(
+    to_email: str,
+    tenant_name: str,
+    stage: str,
+    due_date: datetime,
+    grace_period_ends: datetime | None = None,
+    plan_name: str = "Pro",
+    admin_name: str | None = None,
+    platform_url: str | None = None,
+    portal_url: str | None = None,
+) -> dict:
+    """Helper to dispatch branded subscription reminder warning email via Resend API."""
+    clean_tenant_name = tenant_name.strip() if tenant_name else "Institusi Sekolah"
+
+    subjects = {
+        "due_in_7": f"[Pengingat] Masa Aktif Langganan EXAMIND Berakhir dalam 7 Hari - {clean_tenant_name}",
+        "due_in_3": f"[Peringatan] Masa Aktif Langganan EXAMIND Berakhir dalam 3 Hari - {clean_tenant_name}",
+        "due_today": f"[Pemberitahuan] Masa Langganan EXAMIND Berakhir Hari Ini - {clean_tenant_name}",
+        "grace_period": f"[Penting] Langganan EXAMIND Jatuh Tempo - Masa Tenggang Aktif - {clean_tenant_name}",
+        "expired": f"[Penting] Masa Tenggang Langganan EXAMIND Telah Berakhir - {clean_tenant_name}",
+    }
+    subject = subjects.get(stage, f"[Pemberitahuan] Status Langganan EXAMIND - {clean_tenant_name}")
+
+    html_content = render_subscription_reminder_html(
+        tenant_name=clean_tenant_name,
+        stage=stage,
+        due_date=due_date,
+        grace_period_ends=grace_period_ends,
+        plan_name=plan_name,
+        admin_name=admin_name,
+        platform_url=platform_url,
+        portal_url=portal_url,
+    )
+
+    return await send_email_via_resend(
+        to_email=to_email,
+        subject=subject,
+        html_content=html_content,
+    )
+
 
