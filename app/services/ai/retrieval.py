@@ -11,6 +11,11 @@ from app.models.session import ExamSession, StudentAnswer
 from app.models.question import Question, QuestionBank
 from app.core.exceptions import AppException
 from app.core.cache import memory_cache
+from app.core.billing_defaults import (
+    DEFAULT_PRICING_PLANS,
+    DEFAULT_AI_CREDITS_CONFIG,
+    DEFAULT_PROMO_CODES,
+)
 from fastapi import status
 
 logger = logging.getLogger(__name__)
@@ -170,6 +175,43 @@ def build_scoped_user_context(user: User, db: Session, query: Optional[str] = No
         lines.append(f"- Total Pengguna: {total_users}")
         lines.append(f"- Total Ujian Dibuat: {total_exams}")
         lines.append(f"- Total Kelas Terdaftar: {total_classes}")
+        lines.append("")
+
+        lines.append("=== DATA PROMO & HARGA (ADMIN) ===")
+        lines.append("Daftar Kode Promo Aktif:")
+        active_promos = [p for p in DEFAULT_PROMO_CODES if p.get("is_active", True)]
+        if not active_promos:
+            lines.append("- Tidak ada promo aktif saat ini.")
+        else:
+            for p in active_promos:
+                discount_parts = []
+                dtype = p.get("discount_type")
+                dval = p.get("discount_value", 0)
+                bonus = p.get("credit_bonus", 0)
+                if dtype == "percentage" and dval:
+                    discount_parts.append(f"Diskon {dval}%")
+                elif dtype == "fixed" and dval:
+                    discount_parts.append(f"Potongan Rp {dval:,}".replace(",", "."))
+                if bonus:
+                    discount_parts.append(f"Bonus {bonus:,} Kredit AI".replace(",", "."))
+                discount_str = ", ".join(discount_parts) if discount_parts else "-"
+
+                lines.append(
+                    f"- Kode Promo: {p['code']} | Deskripsi: {p.get('description', '-')} | "
+                    f"Diskon/Bonus: {discount_str} | Masa Berlaku: {p.get('valid_until', '-')} | "
+                    f"Pemakaian: {p.get('used_count', 0)}/{p.get('max_uses', 0)}"
+                )
+
+        lines.append("Daftar Paket Langganan:")
+        for plan in DEFAULT_PRICING_PLANS:
+            price_m = f"Rp {plan.get('price_monthly', 0):,}".replace(",", ".")
+            price_y = f"Rp {plan.get('price_annually', 0):,}".replace(",", ".")
+            credits_m = f"{plan.get('ai_credits_monthly', 0):,}".replace(",", ".")
+            lines.append(
+                f"- Paket {plan['name']}: {price_m}/bulan ({price_y}/tahun) | "
+                f"Kapasitas: {plan.get('max_students', 0)} siswa, {plan.get('max_teachers', 0)} guru | "
+                f"Kredit AI: {credits_m}/bln | Pengawasan: {plan.get('proctoring_type', '-')}"
+            )
         lines.append("")
 
     res_str = "\n".join(lines)

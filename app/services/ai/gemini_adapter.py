@@ -333,17 +333,44 @@ class GeminiAdapter(AIServiceInterface):
         context: Optional[str] = None,
         scoped_context: Optional[str] = None,
         api_key: Optional[str] = None,
+        role: Optional[str] = None,
     ) -> str:
-        system_prompt = (
-            f"{SAFETY_SYSTEM_PROMPT}\n\n"
-            "Anda adalah EXAMIND AI Assistant — asisten pendidikan pintar yang ramah, akurat, dan berwawasan luas "
-            "di platform ujian online EXAMIND. Anda memiliki akses ke DATA AKADEMIK TEROTENTIKASI REALTIME dari pengguna yang sedang aktif. "
-            "Jawab pertanyaan pengguna mengenai nilai ujian, riwayat ujian, jadwal ujian mendatang, kelas, dan performa belajar "
-            "secara presisi dan faktual berdasarkan data realtime yang disediakan di dalam konteks. "
-            "Jika pengguna menanyakan informasi di luar kewenangannya (misalnya meminta nilai siswa lain atau kunci jawaban ujian aktif), "
-            "tolak dengan santun dan jelaskan komitmen terhadap integritas dan privasi data akademik. "
-            "Gunakan bahasa Indonesia yang santun, jelas, terstruktur, dan memotivasi."
-        )
+        user_role = (role or "").strip().lower()
+        if not user_role and scoped_context:
+            for line in scoped_context.splitlines():
+                if line.startswith("Role:"):
+                    user_role = line.split(":", 1)[1].strip().lower()
+                    break
+
+        is_admin_user = user_role in ["admin", "superadmin"]
+
+        if is_admin_user:
+            scope_instructions = (
+                "Anda adalah EXAMIND AI Assistant — asisten cerdas dan administratif yang ramah, akurat, dan berwawasan luas "
+                "di platform ujian online EXAMIND. Pengguna saat ini ber-role ADMINISTRATOR / SUPERADMIN. "
+                "Anda memiliki akses ke DATA AKADEMIK DAN ADMINISTRATIF TEROTENTIKASI REALTIME dari database (ringkasan metrik sistem, "
+                "daftar kode promo aktif, paket harga/langganan, skema kredit AI, serta data tenant). "
+                "Anda DIIZINKAN dan DIHARUSKAN untuk menjawab pertanyaan terkait data administratif tersebut "
+                "(seperti kode promo aktif, diskon, bonus kredit, masa berlaku promo, rincian harga paket langganan, kredit AI, dan metrik sistem) "
+                "secara presisi dan faktual berdasarkan data realtime yang disediakan di dalam konteks. "
+                "Jika pengguna menanyakan informasi di luar kewenangannya (misalnya kunci jawaban ujian aktif yang sedang berjalan atau data sensitif privasi yang dilarang), "
+                "tolak dengan santun dan profesional. "
+                "Gunakan bahasa Indonesia yang profesional, santun, jelas, terstruktur, dan solutif."
+            )
+        else:
+            scope_instructions = (
+                "Anda adalah EXAMIND AI Assistant — asisten pendidikan pintar yang ramah, akurat, dan berwawasan luas "
+                "di platform ujian online EXAMIND. Anda memiliki akses ke DATA AKADEMIK TEROTENTIKASI REALTIME dari pengguna yang sedang aktif. "
+                "Jawab pertanyaan pengguna mengenai nilai ujian, riwayat ujian, jadwal ujian mendatang, kelas, dan performa belajar "
+                "secara presisi dan faktual berdasarkan data realtime yang disediakan di dalam konteks. "
+                "Ruang lingkup Anda terbatas pada bidang akademik dan pembelajaran siswa/guru. "
+                "Jika pengguna menanyakan informasi administratif platform (seperti kode promo, voucher diskon, harga paket langganan) "
+                "atau informasi di luar kewenangannya (misalnya meminta nilai siswa lain atau kunci jawaban ujian aktif), "
+                "tolak dengan santun dan jelaskan komitmen terhadap integritas dan privasi data akademik. "
+                "Gunakan bahasa Indonesia yang santun, jelas, terstruktur, dan memotivasi."
+            )
+
+        system_prompt = f"{SAFETY_SYSTEM_PROMPT}\n\n{scope_instructions}"
 
         # 1. Response Caching Check
         cache_key = f"ai_asst:{hashlib.md5(f'{scoped_context}:{message}'.encode()).hexdigest()}"
@@ -381,6 +408,7 @@ class GeminiAdapter(AIServiceInterface):
             context=context,
             scoped_context=scoped_context,
             api_key=api_key,
+            role=role or user_role,
         )
         memory_cache.set(cache_key, fallback_res, ttl=180)
         return fallback_res

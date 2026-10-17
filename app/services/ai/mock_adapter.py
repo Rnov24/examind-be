@@ -312,6 +312,7 @@ class MockAIService(AIServiceInterface):
         context: Optional[str] = None,
         scoped_context: Optional[str] = None,
         api_key: Optional[str] = None,
+        role: Optional[str] = None,
     ) -> str:
         msg_lower = message.lower()
         
@@ -355,6 +356,39 @@ class MockAIService(AIServiceInterface):
             return (
                 "Sistem pengawasan EXAMIND menggunakan Dual-Camera Proctoring dengan prinsip Human-in-the-Loop. "
                 "AI hanya menandai (flagging) insiden untuk ditinjau secara objektif oleh guru/pengawas."
+            )
+        elif any(k in msg_lower for k in ["promo", "voucher", "diskon", "harga", "pricing", "paket"]):
+            if scoped_context and "=== DATA PROMO" in scoped_context:
+                parts = scoped_context.split("=== DATA PROMO")[1]
+                if "\n===" in parts:
+                    parts = parts.split("\n===")[0]
+                lines_in_part = [
+                    line.strip()
+                    for line in parts.splitlines()
+                    if line.strip() and not line.strip().endswith("===")
+                ]
+                promo_content = "\n".join(lines_in_part)
+                return f"Berikut informasi promo dan paket harga yang tersedia di EXAMIND:\n\n{promo_content}"
+
+            user_role = (role or "").strip().lower()
+            if not user_role and scoped_context:
+                for line in scoped_context.splitlines():
+                    if line.startswith("Role:"):
+                        user_role = line.split(":", 1)[1].strip().lower()
+                        break
+
+            if user_role in ["student", "teacher"] or (
+                scoped_context and any(r in scoped_context for r in ["Role: STUDENT", "Role: TEACHER"])
+            ):
+                return (
+                    "Maaf, sebagai AI Assistant pada platform ujian EXAMIND, peran saya didedikasikan khusus "
+                    "untuk pendampingan evaluasi pembelajaran, pembahasan butir soal, dan pengecekan data akademik Anda. "
+                    "Saya tidak dapat memberikan informasi mengenai promo atau paket harga platform."
+                )
+            # Admin role but no promo section in context (should not happen): fail gracefully.
+            return (
+                "Data promo dan paket harga belum tersedia dalam konteks saat ini. "
+                "Silakan coba lagi sesaat atau hubungi administrator sistem."
             )
         else:
             return (

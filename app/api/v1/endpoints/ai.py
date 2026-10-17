@@ -111,6 +111,7 @@ def chat_with_assistant(
                 context=request.context,
                 scoped_context=scoped_context,
                 api_key=request.api_key,
+                role=current_user.role,
             )
         else:
             reply = "Halo! Saya siap membantu Anda dalam penyusunan soal dan evaluasi pembelajaran."

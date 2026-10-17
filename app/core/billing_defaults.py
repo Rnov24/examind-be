@@ -1,0 +1,126 @@
+"""Billing defaults for pricing plans, AI credits configuration, and promotional codes.
+Shared across superadmin endpoints and scoped AI retrieval.
+"""
+
+DEFAULT_PRICING_PLANS = [
+    {
+        "id": "starter",
+        "name": "Starter School",
+        "price_monthly": 1500000,
+        "price_annually": 15000000,
+        "max_students": 250,
+        "max_teachers": 20,
+        "max_storage_gb": 10,
+        "ai_credits_monthly": 1000,
+        "proctoring_type": "single_camera",
+        "description": "Ideal untuk sekolah skala kecil, bimbel, dan evaluasi berkala.",
+        "features": [
+            "Maksimum 250 Siswa Aktif",
+            "Hingga 20 Akun Guru & Staf",
+            "1.000 Kredit AI Generator / Bulan",
+            "Pengawasan Single Camera (Webcam Depan)",
+            "Kapasitas Penyimpanan Snapshot 10 GB",
+            "Ekspor Laporan Nilai PDF & Excel",
+        ],
+        "is_popular": False,
+    },
+    {
+        "id": "pro",
+        "name": "Pro Institutional",
+        "price_monthly": 3500000,
+        "price_annually": 35000000,
+        "max_students": 1000,
+        "max_teachers": 100,
+        "max_storage_gb": 50,
+        "ai_credits_monthly": 5000,
+        "proctoring_type": "dual_camera",
+        "description": "Standar emas sekolah unggulan dengan pengawasan ganda dan AI grading.",
+        "features": [
+            "Maksimum 1.000 Siswa Aktif",
+            "Hingga 100 Akun Guru & Staf",
+            "5.000 Kredit AI Generator & Grading / Bulan",
+            "AI Dual-Camera Proctoring (HP + Laptop)",
+            "Kapasitas Penyimpanan Snapshot 50 GB",
+            "Koreksi Esai Semantik AI + Rubrik",
+            "Analisis Psikometrik IRT & Taksonomi Bloom",
+            "Prioritas Dukungan Teknis 24/7",
+        ],
+        "is_popular": True,
+    },
+    {
+        "id": "enterprise",
+        "name": "Enterprise District",
+        "price_monthly": 7500000,
+        "price_annually": 75000000,
+        "max_students": 5000,
+        "max_teachers": 500,
+        "max_storage_gb": 200,
+        "ai_credits_monthly": 25000,
+        "proctoring_type": "dual_camera",
+        "description": "Untuk yayasan multi-sekolah, dinas pendidikan daerah, dan universitas.",
+        "features": [
+            "Kapasitas Siswa & Guru Skala Besar (Custom)",
+            "25.000 Kredit AI Bulanan (Dedicated Pool)",
+            "KMS Encryption Key Vault Pribadi",
+            "SLA Uptime 99.9% dengan TiDB Cloud High Availability",
+            "Single Sign-On (SSO Google Workspace & Kemdikbud)",
+            "Integrasi Webhook & API Sistem Informasi Sekolah (SIS)",
+            "Dedicated Account Manager & Training Guru",
+        ],
+        "is_popular": False,
+    },
+]
+
+DEFAULT_AI_CREDITS_CONFIG = {
+    "task_rates": [
+        {"task": "question_mcq", "label": "Pembuatan 1 Soal Pilihan Ganda (AI)", "credits": 5, "description": "Sintesis soal, taksonomi Bloom, dan opsi distraktor."},
+        {"task": "question_essay", "label": "Pembuatan 1 Soal Esai + Rubrik (AI)", "credits": 10, "description": "Kriteria penilaian mendalam & kata kunci penilaian."},
+        {"task": "essay_grading", "label": "Koreksi 1 Jawaban Esai Siswa (Semantic)", "credits": 2, "description": "Penilaian berbasis rubrik dengan confidence score."},
+        {"task": "tutor_explanation", "label": "1 Sesi Percakapan Tutor AI Siswa", "credits": 1, "description": "Eksplorasi konsep dan bimbingan setelah ujian."},
+        {"task": "cv_verification", "label": "Audit Multimodal Insiden Pengawas (CV)", "credits": 3, "description": "Verifikasi wajah & gawai kedua pada snapshot."},
+    ],
+    "topup_bundles": [
+        {"id": "bundle-s", "name": "Paket Mini Top-Up", "credits": 2000, "price": 120000, "bonus": "0%"},
+        {"id": "bundle-m", "name": "Paket Sekolah Top-Up", "credits": 10000, "price": 450000, "bonus": "+10% Kredit"},
+        {"id": "bundle-l", "name": "Paket Semester Unlimited Pool", "credits": 50000, "price": 1850000, "bonus": "+25% Kredit"},
+    ]
+}
+
+DEFAULT_PROMO_CODES = [
+    {
+        "id": 1,
+        "code": "MERDEKA2026",
+        "discount_type": "percentage",
+        "discount_value": 30,
+        "credit_bonus": 2000,
+        "max_uses": 50,
+        "used_count": 14,
+        "valid_until": "2026-12-31",
+        "description": "Diskon 30% langganan tahunan + Bonus 2.000 kredit AI",
+        "is_active": True,
+    },
+    {
+        "id": 2,
+        "code": "SEKOLAHUNGGUL",
+        "discount_type": "credit_bonus",
+        "discount_value": 0,
+        "credit_bonus": 10000,
+        "max_uses": 20,
+        "used_count": 8,
+        "valid_until": "2026-11-30",
+        "description": "Bonus langsung 10.000 Kredit AI untuk adopsi kurikulum baru",
+        "is_active": True,
+    },
+    {
+        "id": 3,
+        "code": "EARLYBIRD",
+        "discount_type": "fixed",
+        "discount_value": 500000,
+        "credit_bonus": 1000,
+        "max_uses": 100,
+        "used_count": 32,
+        "valid_until": "2026-12-15",
+        "description": "Potongan langsung Rp 500.000 untuk tagihan pertama paket Pro",
+        "is_active": True,
+    },
+]

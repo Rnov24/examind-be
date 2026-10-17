@@ -28,6 +28,7 @@ class AIServiceInterface(ABC):
         context: Optional[str] = None,
         scoped_context: Optional[str] = None,
         api_key: Optional[str] = None,
+        role: Optional[str] = None,
     ) -> str:
         """Global AI assistant for answering scoped database queries (grades, tests, schedules)
         and platform educational inquiries.
