@@ -1,8 +1,17 @@
+import os
+import re
+import base64
 import secrets
 import string
 import logging
 import httpx
 from app.core.config import settings
+
+# Strip bracketed IPv6 literals in NO_PROXY to prevent httpx InvalidURL parsing error
+for _var in ("NO_PROXY", "no_proxy"):
+    _val = os.environ.get(_var)
+    if _val and "[" in _val:
+        os.environ[_var] = re.sub(r"\[([0-9a-fA-F:]+)\]", r"\1", _val)
 
 logger = logging.getLogger("examind.resend")
 RESEND_API_ENDPOINT = "https://api.resend.com/emails"
@@ -14,57 +23,48 @@ def generate_otp(length: int = 6) -> str:
     return "".join(secrets.choice(digits) for _ in range(length))
 
 
-def render_otp_html(otp_code: str, purpose: str = "email_verification", expires_in_minutes: int = 10) -> str:
-    """Render a branded, responsive HTML template for EXAMIND OTP emails."""
-    purpose_title = "Verifikasi Alamat Email" if purpose == "email_verification" else "Permintaan Kode Keamanan"
-    purpose_desc = (
-        "Terima kasih telah bergabung dengan platform ujian online EXAMIND. Masukkan kode verifikasi berikut untuk mengonfirmasi email akun Anda:"
-        if purpose == "email_verification"
-        else "Gunakan kode otorisasi berikut untuk memproses verifikasi keamanan akun EXAMIND Anda:"
-    )
-
+def _email_shell(title: str, body_html: str) -> str:
+    """Shared single-column, table-based responsive email shell adhering to EXAMIND precision palette."""
     return f"""<!DOCTYPE html>
 <html lang="id">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{purpose_title}</title>
+  <title>{title}</title>
 </head>
-<body style="margin: 0; padding: 0; background-color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f8fafc;">
-  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #0f172a; padding: 40px 10px;">
+<body style="margin: 0; padding: 0; background-color: #f4f4f5; font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; color: #18181b;">
+  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f4f4f5; padding: 32px 12px;">
     <tr>
       <td align="center">
-        <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 520px; background-color: #1e293b; border-radius: 16px; border: 1px solid #334155; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);">
-          <!-- Header -->
+        <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #ffffff; border-radius: 8px; border: 1px solid #e4e4e7; overflow: hidden;">
+          <!-- Midnight-Violet Header Band with Lime Accent Rule -->
           <tr>
-            <td style="padding: 32px 32px 20px 32px; text-align: center; border-bottom: 1px solid #334155;">
-              <h1 style="margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.03em; color: #38bdf8;">EXAMIND</h1>
-              <p style="margin: 4px 0 0 0; font-size: 13px; color: #94a3b8; font-weight: 500;">AI-Powered Academic Examination System</p>
+            <td style="background-color: #150f23; padding: 24px 32px; text-align: left;">
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td>
+                    <span style="font-size: 20px; font-weight: 800; letter-spacing: 0.05em; color: #ffffff; text-transform: uppercase;">EXAMIND</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding-top: 6px;">
+                    <div style="height: 3px; width: 36px; background-color: #c2ef4e; line-height: 3px; font-size: 0;">&nbsp;</div>
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
           <!-- Body -->
           <tr>
-            <td style="padding: 32px;">
-              <h2 style="margin: 0 0 12px 0; font-size: 20px; font-weight: 700; color: #f1f5f9;">{purpose_title}</h2>
-              <p style="margin: 0 0 24px 0; font-size: 14px; line-height: 1.6; color: #cbd5e1;">{purpose_desc}</p>
-              
-              <!-- OTP Box -->
-              <div style="background-color: #090d16; border: 1px dashed #38bdf8; border-radius: 12px; padding: 20px; text-align: center; margin: 24px 0;">
-                <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: #94a3b8; margin-bottom: 8px;">Kode Verifikasi OTP</div>
-                <div style="font-size: 36px; font-weight: 800; letter-spacing: 8px; color: #38bdf8; font-family: monospace;">{otp_code}</div>
-                <div style="font-size: 12px; color: #e2e8f0; margin-top: 8px; opacity: 0.85;">Berlaku selama {expires_in_minutes} menit</div>
-              </div>
-
-              <p style="margin: 24px 0 0 0; font-size: 13px; line-height: 1.5; color: #94a3b8;">
-                ⚠️ <em>Jangan bagikan kode ini kepada siapapun. Tim EXAMIND tidak akan pernah meminta kode verifikasi Anda.</em>
-              </p>
+            <td style="padding: 32px; background-color: #ffffff; color: #18181b; font-size: 14px; line-height: 1.6;">
+              {body_html}
             </td>
           </tr>
           <!-- Footer -->
           <tr>
-            <td style="padding: 20px 32px 28px 32px; background-color: #172033; border-top: 1px solid #334155; text-align: center;">
-              <p style="margin: 0; font-size: 12px; color: #64748b;">&copy; 2026 EXAMIND Inc. Hak Cipta Dilindungi.</p>
-              <p style="margin: 4px 0 0 0; font-size: 11px; color: #475569;">Pesan otomatis ini dikirim sehubungan dengan aktivitas akun Anda.</p>
+            <td style="padding: 24px 32px; background-color: #fafafa; border-top: 1px solid #f4f4f5; text-align: center;">
+              <p style="margin: 0; font-size: 12px; color: #71717a; line-height: 1.5;">&copy; 2026 EXAMIND. Sistem Ujian &amp; Evaluasi Akademik Berbasis AI.</p>
+              <p style="margin: 4px 0 0 0; font-size: 11px; color: #a1a1aa; line-height: 1.4;">Email transaksional otomatis. Harap tidak membalas email ini.</p>
             </td>
           </tr>
         </table>
@@ -75,7 +75,192 @@ def render_otp_html(otp_code: str, purpose: str = "email_verification", expires_
 </html>"""
 
 
-async def send_email_via_resend(to_email: str, subject: str, html_content: str) -> dict:
+def render_otp_html(otp_code: str, purpose: str = "email_verification", expires_in_minutes: int = 10) -> str:
+    """Render a branded, responsive HTML template for EXAMIND OTP emails."""
+    purpose_title = "Verifikasi Alamat Email" if purpose == "email_verification" else "Kode Keamanan Akun"
+    purpose_desc = (
+        "Gunakan kode verifikasi berikut untuk mengonfirmasi alamat email akun EXAMIND Anda:"
+        if purpose == "email_verification"
+        else "Gunakan kode otorisasi berikut untuk verifikasi keamanan akun EXAMIND Anda:"
+    )
+
+    body_html = f"""<h1 style="margin: 0 0 12px 0; font-size: 20px; font-weight: 700; color: #150f23;">{purpose_title}</h1>
+<p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.6; color: #3f3f46;">{purpose_desc}</p>
+
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin: 24px 0;">
+  <tr>
+    <td align="center" style="background-color: #ede9fe; border-radius: 6px; padding: 20px; border: 1px solid #ddd6fe;">
+      <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #6a5fc1; margin-bottom: 8px;">Kode Verifikasi OTP</div>
+      <div style="font-family: ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size: 36px; font-weight: 700; letter-spacing: 8px; color: #6a5fc1; line-height: 1;">{otp_code}</div>
+      <div style="font-size: 12px; color: #52525b; margin-top: 8px;">Berlaku selama {expires_in_minutes} menit</div>
+    </td>
+  </tr>
+</table>
+
+<p style="margin: 0 0 12px 0; font-size: 13px; line-height: 1.5; color: #71717a;">
+  Jangan bagikan kode ini kepada siapa pun. Tim EXAMIND tidak akan pernah meminta kode verifikasi Anda.
+</p>
+<p style="margin: 16px 0 0 0; font-size: 12px; line-height: 1.5; color: #a1a1aa; border-top: 1px solid #f4f4f5; padding-top: 16px;">
+  Jika Anda tidak merasa melakukan permintaan ini, abaikan pesan ini.
+</p>"""
+
+    return _email_shell(title=f"{purpose_title} - EXAMIND", body_html=body_html)
+
+
+def render_password_reset_html(
+    user_name: str,
+    reset_url: str,
+    token_code: str,
+    expires_in_minutes: int = 15,
+) -> str:
+    """Render high-aesthetic, branded HTML template for EXAMIND Password Reset."""
+    display_name = user_name.strip() if user_name else "Pengguna EXAMIND"
+
+    body_html = f"""<h1 style="margin: 0 0 12px 0; font-size: 20px; font-weight: 700; color: #150f23;">Atur Ulang Kata Sandi</h1>
+<p style="margin: 0 0 16px 0; font-size: 14px; line-height: 1.6; color: #3f3f46;">
+  Halo <strong>{display_name}</strong>, kami menerima permintaan untuk mengatur ulang kata sandi akun EXAMIND Anda.
+</p>
+<p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.6; color: #3f3f46;">
+  Klik tautan di bawah ini untuk membuat kata sandi baru:
+</p>
+
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" style="margin: 24px 0;">
+  <tr>
+    <td align="center" style="background-color: #150f23; border-radius: 6px;">
+      <a href="{reset_url}" target="_blank" style="display: inline-block; padding: 12px 24px; font-size: 14px; font-weight: 600; color: #ffffff; text-decoration: none;">Atur Ulang Kata Sandi</a>
+    </td>
+  </tr>
+</table>
+
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin: 24px 0;">
+  <tr>
+    <td align="center" style="background-color: #ede9fe; border-radius: 6px; padding: 16px; border: 1px solid #ddd6fe;">
+      <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #6a5fc1; margin-bottom: 6px;">Atau Masukkan Kode Secara Manual:</div>
+      <div style="font-family: ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size: 28px; font-weight: 700; letter-spacing: 6px; color: #6a5fc1; line-height: 1;">{token_code}</div>
+      <div style="font-size: 12px; color: #52525b; margin-top: 6px;">Berlaku selama {expires_in_minutes} menit</div>
+    </td>
+  </tr>
+</table>
+
+<p style="margin: 16px 0 6px 0; font-size: 12px; color: #71717a;">
+  Tautan alternatif jika tombol di atas tidak dapat diklik:
+</p>
+<div style="background-color: #f4f4f5; padding: 10px 12px; border-radius: 6px; font-family: ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, monospace; font-size: 11px; color: #52525b; word-break: break-all; border: 1px solid #e4e4e7;">
+  {reset_url}
+</div>
+
+<p style="margin: 20px 0 0 0; font-size: 12px; line-height: 1.5; color: #a1a1aa; border-top: 1px solid #f4f4f5; padding-top: 16px;">
+  Jika Anda tidak merasa melakukan permintaan ini, abaikan email ini. Kata sandi lama Anda tetap aman dan tidak akan berubah.
+</p>"""
+
+    return _email_shell(title="Atur Ulang Kata Sandi - EXAMIND", body_html=body_html)
+
+
+def render_password_reset_success_html(user_name: str) -> str:
+    """Render notification confirming password has been successfully reset."""
+    display_name = user_name.strip() if user_name else "Pengguna EXAMIND"
+
+    body_html = f"""<h1 style="margin: 0 0 12px 0; font-size: 20px; font-weight: 700; color: #150f23;">Kata Sandi Berhasil Diperbarui</h1>
+<p style="margin: 0 0 16px 0; font-size: 14px; line-height: 1.6; color: #3f3f46;">
+  Halo <strong>{display_name}</strong>,
+</p>
+<p style="margin: 0 0 16px 0; font-size: 14px; line-height: 1.6; color: #3f3f46;">
+  Kata sandi akun EXAMIND Anda telah berhasil diperbarui. Anda kini dapat masuk kembali ke sistem menggunakan kata sandi baru Anda.
+</p>
+<p style="margin: 20px 0 0 0; font-size: 12px; line-height: 1.5; color: #a1a1aa; border-top: 1px solid #f4f4f5; padding-top: 16px;">
+  Jika Anda tidak merasa melakukan pembaruan ini, segera hubungi administrator sekolah untuk mengamankan akun Anda.
+</p>"""
+
+    return _email_shell(title="Kata Sandi Berhasil Diperbarui - EXAMIND", body_html=body_html)
+
+
+def render_exam_result_html(
+    student_name: str,
+    exam_title: str,
+    score: float | int | str,
+    grade_predicate: str | None = None,
+    correct_count: int = 0,
+    wrong_count: int = 0,
+    unanswered_count: int = 0,
+    summary_counts: dict | None = None,
+    platform_url: str | None = None,
+) -> str:
+    """Render branded email reporting exam result with attached PDF notification."""
+    display_name = student_name.strip() if student_name else "Siswa"
+    clean_exam_title = exam_title.strip() if exam_title else "Ujian"
+
+    if summary_counts:
+        correct_count = summary_counts.get("correct", summary_counts.get("correct_count", correct_count))
+        wrong_count = summary_counts.get("wrong", summary_counts.get("wrong_count", wrong_count))
+        unanswered_count = summary_counts.get("unanswered", summary_counts.get("unanswered_count", unanswered_count))
+
+    try:
+        score_num = float(score)
+        formatted_score = f"{score_num:.1f}" if score_num % 1 != 0 else f"{int(score_num)}"
+    except (ValueError, TypeError):
+        formatted_score = str(score)
+
+    portal_url = platform_url or getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+
+    predicate_badge = ""
+    if grade_predicate and str(grade_predicate).strip():
+        predicate_badge = f"""<div style="margin-top: 12px;">
+  <span style="display: inline-block; padding: 4px 12px; border-radius: 4px; background-color: #c2ef4e; color: #150f23; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;">
+    {str(grade_predicate).strip()}
+  </span>
+</div>"""
+
+    body_html = f"""<h1 style="margin: 0 0 8px 0; font-size: 20px; font-weight: 700; color: #150f23;">Hasil Evaluasi Ujian</h1>
+<p style="margin: 0 0 16px 0; font-size: 14px; line-height: 1.6; color: #3f3f46;">
+  Halo <strong>{display_name}</strong>, proses penilaian untuk ujian <strong>{clean_exam_title}</strong> telah selesai. Berikut adalah ringkasan hasil yang Anda peroleh:
+</p>
+
+<!-- Score Card -->
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin: 20px 0;">
+  <tr>
+    <td align="center" style="background-color: #150f23; border-radius: 8px; padding: 24px; text-align: center;">
+      <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #a1a1aa; margin-bottom: 6px;">Nilai Akhir</div>
+      <div style="font-size: 48px; font-weight: 800; color: #c2ef4e; line-height: 1; letter-spacing: -0.02em;">{formatted_score}</div>
+      {predicate_badge}
+    </td>
+  </tr>
+</table>
+
+<!-- Section Summary Table -->
+<div style="font-size: 12px; font-weight: 600; color: #52525b; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px;">Ringkasan Soal Pilihan Ganda</div>
+<table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 24px; border: 1px solid #e4e4e7; border-radius: 6px; overflow: hidden;">
+  <tr>
+    <td align="center" style="padding: 12px; background-color: #fafafa; border-right: 1px solid #e4e4e7; width: 33%;">
+      <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #71717a; letter-spacing: 0.05em;">Benar</div>
+      <div style="font-size: 18px; font-weight: 700; color: #15803d; margin-top: 4px;">{correct_count}</div>
+    </td>
+    <td align="center" style="padding: 12px; background-color: #fafafa; border-right: 1px solid #e4e4e7; width: 33%;">
+      <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #71717a; letter-spacing: 0.05em;">Salah</div>
+      <div style="font-size: 18px; font-weight: 700; color: #b91c1c; margin-top: 4px;">{wrong_count}</div>
+    </td>
+    <td align="center" style="padding: 12px; background-color: #fafafa; width: 34%;">
+      <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #71717a; letter-spacing: 0.05em;">Kosong</div>
+      <div style="font-size: 18px; font-weight: 700; color: #71717a; margin-top: 4px;">{unanswered_count}</div>
+    </td>
+  </tr>
+</table>
+
+<p style="margin: 0 0 12px 0; font-size: 13px; line-height: 1.5; color: #3f3f46;">
+  Laporan evaluasi lengkap beserta rincian lembar jawaban siswa telah dilampirkan dalam berkas PDF pada email ini.
+</p>
+<p style="margin: 0; font-size: 12px; line-height: 1.5; color: #71717a; border-top: 1px solid #f4f4f5; padding-top: 16px;">
+  Anda juga dapat meninjau rincian hasil ujian melalui portal EXAMIND di <a href="{portal_url}" target="_blank" style="color: #6a5fc1; text-decoration: underline;">{portal_url}</a>.
+</p>"""
+
+    return _email_shell(title=f"Hasil Ujian: {clean_exam_title} - EXAMIND", body_html=body_html)
+
+
+async def send_email_via_resend(
+    to_email: str,
+    subject: str,
+    html_content: str,
+    attachments: list[dict] | None = None,
+) -> dict:
     """Send transactional email using Resend API with local mock fallback."""
     from app.core.secret_manager import get_secret
 
@@ -103,6 +288,8 @@ async def send_email_via_resend(to_email: str, subject: str, html_content: str) 
         "subject": subject,
         "html": html_content,
     }
+    if attachments:
+        payload["attachments"] = attachments
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
@@ -131,138 +318,6 @@ async def send_otp_email(to_email: str, otp_code: str, purpose: str = "email_ver
     return await send_email_via_resend(to_email=to_email, subject=subject, html_content=html_content)
 
 
-def render_password_reset_html(
-    user_name: str,
-    reset_url: str,
-    token_code: str,
-    expires_in_minutes: int = 15,
-) -> str:
-    """Render high-aesthetic, branded HTML template for EXAMIND Password Reset."""
-    display_name = user_name.strip() if user_name else "Pengguna EXAMIND"
-
-    return f"""<!DOCTYPE html>
-<html lang="id">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Permintaan Atur Ulang Kata Sandi - EXAMIND</title>
-</head>
-<body style="margin: 0; padding: 0; background-color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f8fafc;">
-  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #0f172a; padding: 40px 12px;">
-    <tr>
-      <td align="center">
-        <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 540px; background-color: #1e293b; border-radius: 16px; border: 1px solid #334155; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);">
-          <!-- Header Branding -->
-          <tr>
-            <td style="padding: 32px 32px 24px 32px; text-align: center; border-bottom: 1px solid #334155; background: linear-gradient(180deg, #1e293b 0%, #172033 100%);">
-              <div style="display: inline-block; width: 44px; height: 44px; line-height: 44px; border-radius: 12px; background-color: #0f172a; border: 1px solid #38bdf8; color: #38bdf8; font-weight: 900; font-size: 18px; margin-bottom: 12px;">EX</div>
-              <h1 style="margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; color: #f8fafc;">EXAMIND</h1>
-              <p style="margin: 4px 0 0 0; font-size: 12px; color: #94a3b8; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em;">Pusat Keamanan Akun & CBT</p>
-            </td>
-          </tr>
-
-          <!-- Content Body -->
-          <tr>
-            <td style="padding: 32px 32px 24px 32px;">
-              <h2 style="margin: 0 0 14px 0; font-size: 20px; font-weight: 700; color: #f1f5f9;">Permintaan Atur Ulang Kata Sandi</h2>
-              <p style="margin: 0 0 16px 0; font-size: 14px; line-height: 1.6; color: #cbd5e1;">
-                Halo <strong>{display_name}</strong>,
-              </p>
-              <p style="margin: 0 0 24px 0; font-size: 14px; line-height: 1.6; color: #94a3b8;">
-                Kami menerima permintaan untuk mengatur ulang kata sandi akun EXAMIND Anda. Klik tombol di bawah ini untuk segera membuat kata sandi baru yang aman:
-              </p>
-
-              <!-- Primary Action Button -->
-              <div style="text-align: center; margin: 28px 0;">
-                <a href="{reset_url}" target="_blank" style="display: inline-block; background-color: #38bdf8; color: #0f172a; font-size: 14px; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 10px; box-shadow: 0 4px 14px 0 rgba(56, 189, 248, 0.4); letter-spacing: -0.01em;">
-                  Atur Ulang Kata Sandi Saya &rarr;
-                </a>
-              </div>
-
-              <!-- Secondary Verification Code Box -->
-              <div style="background-color: #090d16; border: 1px dashed #334155; border-radius: 12px; padding: 18px; text-align: center; margin: 24px 0;">
-                <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8; margin-bottom: 6px;">
-                  Atau Masukkan Kode Verifikasi Ini Secara Manual:
-                </div>
-                <div style="font-size: 28px; font-weight: 800; letter-spacing: 6px; color: #38bdf8; font-family: 'Courier New', Courier, monospace;">
-                  {token_code}
-                </div>
-                <div style="font-size: 12px; color: #64748b; margin-top: 6px;">
-                  Berlaku selama <strong>{expires_in_minutes} menit</strong>
-                </div>
-              </div>
-
-              <!-- Fallback Direct Link -->
-              <p style="margin: 20px 0 8px 0; font-size: 12px; color: #64748b; line-height: 1.5;">
-                Jika tombol di atas tidak dapat diklik, salin dan tempel tautan berikut ke peramban (browser) Anda:
-              </p>
-              <div style="background-color: #0f172a; padding: 10px 14px; border-radius: 8px; border: 1px solid #1e293b; font-size: 11px; color: #38bdf8; word-break: break-all; font-family: monospace;">
-                {reset_url}
-              </div>
-
-              <!-- Security Warning -->
-              <div style="margin-top: 28px; padding-top: 20px; border-top: 1px solid #334155;">
-                <p style="margin: 0; font-size: 12px; line-height: 1.5; color: #ef4444;">
-                  <strong>Pemberitahuan Keamanan:</strong> Jika Anda tidak merasa melakukan permintaan ini, abaikan email ini. Kata sandi lama Anda tetap aman dan tidak akan berubah tanpa tautan/kode ini.
-                </p>
-              </div>
-            </td>
-          </tr>
-
-          <!-- Footer -->
-          <tr>
-            <td style="padding: 20px 32px; background-color: #172033; border-top: 1px solid #334155; text-align: center;">
-              <p style="margin: 0; font-size: 12px; color: #64748b;">
-                &copy; 2026 EXAMIND Academic Assessment System.
-              </p>
-              <p style="margin: 4px 0 0 0; font-size: 11px; color: #475569;">
-                Email transaksional otomatis ini dikirim melalui Resend API Infrastructure.
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>"""
-
-
-def render_password_reset_success_html(user_name: str) -> str:
-    """Render notification confirming password has been successfully reset."""
-    display_name = user_name.strip() if user_name else "Pengguna EXAMIND"
-
-    return f"""<!DOCTYPE html>
-<html lang="id">
-<head>
-  <meta charset="utf-8">
-  <title>Kata Sandi Berhasil Diperbarui - EXAMIND</title>
-</head>
-<body style="margin: 0; padding: 0; background-color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #f8fafc;">
-  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #0f172a; padding: 40px 12px;">
-    <tr>
-      <td align="center">
-        <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 520px; background-color: #1e293b; border-radius: 16px; border: 1px solid #334155; padding: 32px; text-align: center;">
-          <tr>
-            <td>
-              <div style="width: 48px; height: 48px; line-height: 48px; border-radius: 50%; background-color: #10b981; color: white; font-size: 24px; margin: 0 auto 16px auto;">&#10003;</div>
-              <h1 style="margin: 0 0 12px 0; font-size: 22px; font-weight: 800; color: #f1f5f9;">Kata Sandi Berhasil Diperbarui</h1>
-              <p style="font-size: 14px; line-height: 1.6; color: #cbd5e1; margin-bottom: 20px;">
-                Halo <strong>{display_name}</strong>, kata sandi akun EXAMIND Anda baru saja berhasil diatur ulang. Anda kini dapat masuk kembali menggunakan kata sandi baru Anda.
-              </p>
-              <p style="font-size: 12px; color: #ef4444; margin-top: 16px;">
-                Jika bukan Anda yang melakukan perubahan ini, segera hubungi tim admin sekolah Anda untuk mengamankan akun.
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>"""
-
-
 async def send_password_reset_email(
     to_email: str,
     user_name: str,
@@ -286,4 +341,40 @@ async def send_password_reset_success_email(to_email: str, user_name: str) -> di
     subject = "Keamanan Akun: Kata Sandi EXAMIND Berhasil Diperbarui"
     html_content = render_password_reset_success_html(user_name=user_name)
     return await send_email_via_resend(to_email=to_email, subject=subject, html_content=html_content)
+
+
+async def send_exam_result_email(
+    to_email: str,
+    student_name: str,
+    exam_title: str,
+    score: float | int | str,
+    pdf_bytes: bytes,
+    pdf_filename: str,
+    grade_predicate: str | None = None,
+    summary_counts: dict | None = None,
+    platform_url: str | None = None,
+) -> dict:
+    """Helper to render exam result email with attached PDF and dispatch via Resend."""
+    subject = f"Hasil Ujian: {exam_title}"
+    html_content = render_exam_result_html(
+        student_name=student_name,
+        exam_title=exam_title,
+        score=score,
+        grade_predicate=grade_predicate,
+        summary_counts=summary_counts,
+        platform_url=platform_url,
+    )
+    pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+    attachments = [
+        {
+            "content": pdf_base64,
+            "filename": pdf_filename,
+        }
+    ]
+    return await send_email_via_resend(
+        to_email=to_email,
+        subject=subject,
+        html_content=html_content,
+        attachments=attachments,
+    )
 
