@@ -48,7 +48,7 @@ class Settings(BaseSettings):
 
     # Resend Email Integration
     RESEND_API_KEY: str = ""
-    RESEND_FROM_EMAIL: str = "EXAMIND <onboarding@resend.dev>"
+    RESEND_FROM_EMAIL: str = "EXAMIND <noreply@examind.rijal.work>"
 
     model_config = SettingsConfigDict(
         env_file=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env"),
