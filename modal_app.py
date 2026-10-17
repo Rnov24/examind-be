@@ -33,7 +33,7 @@ app = modal.App("examind-be")
 
 @app.function(
     image=image,
-    secrets=[modal.Secret.from_name("examind-env"), modal.Secret.from_name("examind-edge")],
+    secrets=[modal.Secret.from_name("examind-env"), modal.Secret.from_name("examind-edge"), modal.Secret.from_name("examind-frontend")],
     scaledown_window=300,  # keep warm 5 min after last request; raise on exam days
     timeout=600,
 )
@@ -50,7 +50,7 @@ def api():
 
 @app.function(
     image=image,
-    secrets=[modal.Secret.from_name("examind-env"), modal.Secret.from_name("examind-edge")],
+    secrets=[modal.Secret.from_name("examind-env"), modal.Secret.from_name("examind-edge"), modal.Secret.from_name("examind-frontend")],
     schedule=modal.Cron("0 0 * * *"),  # 07:00 WIB daily
     timeout=300,
 )
