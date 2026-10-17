@@ -1,5 +1,7 @@
+import time
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.core.database import get_db
@@ -13,6 +15,7 @@ from app.models.exam import Exam
 from app.models.session import ExamSession
 from app.schemas.auth import UserResponse
 from app.schemas.common import ApiResponse
+from app.services.proctoring.websocket_hub import ws_hub
 
 router = APIRouter(prefix="/admin", tags=["Admin Management"])
 
@@ -47,6 +50,11 @@ def get_admin_stats(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    # Measure real database round-trip latency
+    t0 = time.perf_counter()
+    db.execute(text("SELECT 1"))
+    latency_ms = (time.perf_counter() - t0) * 1000.0
+
     users = db.query(User).all()
     total_admins = sum(1 for u in users if u.role == "admin")
     total_teachers = sum(1 for u in users if u.role == "teacher")
@@ -62,6 +70,8 @@ def get_admin_stats(
     completed_sessions = sum(1 for s in sessions if s.status in ["submitted", "graded"])
     disqualified_sessions = sum(1 for s in sessions if s.status == "disqualified")
 
+    active_cameras = len(ws_hub.companion_streams)
+
     stats = AdminStatsResponse(
         total_users=len(users),
         total_admins=total_admins,
@@ -74,8 +84,8 @@ def get_admin_stats(
         active_sessions=active_sessions,
         completed_sessions=completed_sessions,
         disqualified_sessions=disqualified_sessions,
-        database_status="Connected (MySQL Port 3306)",
-        edge_cv_status="Online (Client-Side Edge AI)",
+        database_status=f"Connected ({latency_ms:.0f} ms)",
+        edge_cv_status=f"{active_cameras} kamera terhubung",
     )
     return ApiResponse.ok(data=stats, message="Statistik institusi berhasil dimuat")
 
