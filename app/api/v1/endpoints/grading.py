@@ -1,17 +1,18 @@
 from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, status
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import require_teacher
+from app.core.timing import log_query_timing
 from app.models.user import User
 from app.models.exam import Exam, ExamQuestion
 from app.models.session import ExamSession, StudentAnswer
 from app.models.question import Question
 from app.schemas.session import StudentExamResultResponse, StudentAnswerDetail
-from app.schemas.common import ApiResponse
+from app.schemas.common import ApiResponse, PaginatedResponse
 
 router = APIRouter(prefix="/grading", tags=["AI Essay Grading & Teacher Override"])
 
@@ -35,54 +36,81 @@ class SessionGradingSummary(BaseModel):
     submit_time: Optional[datetime] = None
 
 
-@router.get("/exam/{exam_id}/sessions", response_model=ApiResponse[List[SessionGradingSummary]])
+@router.get("/exam/{exam_id}/sessions", response_model=PaginatedResponse[SessionGradingSummary])
 def list_exam_sessions_for_grading(
     exam_id: int,
+    page: int = Query(1, ge=1, description="Nomor halaman"),
+    page_size: int = Query(20, ge=1, le=100, description="Jumlah data per halaman"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
-    sessions = (
-        db.query(ExamSession)
-        .filter(ExamSession.exam_id == exam_id)
-        .all()
-    )
-
-    results = []
-    for s in sessions:
-        # Check lowest confidence among essay answers
-        answers = db.query(StudentAnswer).filter(StudentAnswer.session_id == s.id).all()
-        confidences = [a.ai_confidence_level for a in answers if a.ai_confidence_level]
-
-        if "low" in confidences:
-            lowest_conf = "low"
-            needs_review = True
-        elif "medium" in confidences:
-            lowest_conf = "medium"
-            needs_review = False
-        else:
-            lowest_conf = "high"
-            needs_review = False
-
-        results.append(
-            SessionGradingSummary(
-                session_id=s.id,
-                exam_id=s.exam_id,
-                student_id=s.student_id,
-                student_name=s.student.full_name if s.student else "Siswa",
-                student_identifier=s.student.identifier if s.student else "-",
-                status=s.status,
-                total_score=float(s.total_score or 0.0),
-                integrity_score=s.integrity_score,
-                lowest_confidence_level=lowest_conf,
-                needs_review=needs_review,
-                submit_time=s.submit_time,
-            )
+    with log_query_timing("list_exam_sessions_for_grading"):
+        query = (
+            db.query(ExamSession)
+            .filter(ExamSession.exam_id == exam_id)
+        )
+        total = query.count()
+        sessions = (
+            query.options(joinedload(ExamSession.student))
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
         )
 
-    # Sort so sessions needing review (low confidence) appear at the top
-    results.sort(key=lambda x: (not x.needs_review, x.lowest_confidence_level != "low"))
+        session_ids = [s.id for s in sessions]
+        confidence_map = {}
+        if session_ids:
+            answers = (
+                db.query(StudentAnswer.session_id, StudentAnswer.ai_confidence_level)
+                .filter(
+                    StudentAnswer.session_id.in_(session_ids),
+                    StudentAnswer.ai_confidence_level.isnot(None),
+                )
+                .all()
+            )
+            for sid, conf in answers:
+                confidence_map.setdefault(sid, []).append(conf)
 
-    return ApiResponse.ok(data=results, message="Daftar sesi penilaian ujian berhasil dimuat")
+        results = []
+        for s in sessions:
+            confidences = confidence_map.get(s.id, [])
+
+            if "low" in confidences:
+                lowest_conf = "low"
+                needs_review = True
+            elif "medium" in confidences:
+                lowest_conf = "medium"
+                needs_review = False
+            else:
+                lowest_conf = "high"
+                needs_review = False
+
+            results.append(
+                SessionGradingSummary(
+                    session_id=s.id,
+                    exam_id=s.exam_id,
+                    student_id=s.student_id,
+                    student_name=s.student.full_name if s.student else "Siswa",
+                    student_identifier=s.student.identifier if s.student else "-",
+                    status=s.status,
+                    total_score=float(s.total_score or 0.0),
+                    integrity_score=s.integrity_score,
+                    lowest_confidence_level=lowest_conf,
+                    needs_review=needs_review,
+                    submit_time=s.submit_time,
+                )
+            )
+
+        # Sort so sessions needing review (low confidence) appear at the top
+        results.sort(key=lambda x: (not x.needs_review, x.lowest_confidence_level != "low"))
+
+        return PaginatedResponse.ok(
+            data=results,
+            page=page,
+            page_size=page_size,
+            total=total,
+            message="Daftar sesi penilaian ujian berhasil dimuat",
+        )
 
 
 @router.get("/session/{session_id}", response_model=ApiResponse[StudentExamResultResponse])

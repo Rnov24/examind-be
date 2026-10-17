@@ -8,13 +8,14 @@ class ExamSession(Base):
     __tablename__ = "exam_sessions"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    exam_id = Column(Integer, ForeignKey("exams.id", ondelete="CASCADE"), nullable=False)
-    student_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    exam_id = Column(Integer, ForeignKey("exams.id", ondelete="CASCADE"), nullable=False, index=True)
+    student_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     start_time = Column(DateTime, default=datetime.utcnow, nullable=False)
     submit_time = Column(DateTime, nullable=True)
     status = Column(
         Enum("in_progress", "submitted", "grading_in_progress", "graded", "aborted", name="session_statuses"),
         default="in_progress",
+        index=True,
     )
     total_score = Column(Numeric(5, 2), default=0.00)
     integrity_score = Column(Integer, default=100)
@@ -38,14 +39,14 @@ class StudentAnswer(Base):
     __tablename__ = "student_answers"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    session_id = Column(Integer, ForeignKey("exam_sessions.id", ondelete="CASCADE"), nullable=False)
-    question_id = Column(Integer, ForeignKey("questions.id", ondelete="CASCADE"), nullable=False)
+    session_id = Column(Integer, ForeignKey("exam_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    question_id = Column(Integer, ForeignKey("questions.id", ondelete="CASCADE"), nullable=False, index=True)
     student_response = Column(Text, nullable=True)
     is_correct = Column(Boolean, nullable=True)
     auto_score = Column(Numeric(5, 2), default=0.00)
     teacher_override_score = Column(Numeric(5, 2), nullable=True)
     final_score = Column(Numeric(5, 2), default=0.00)
-    ai_confidence_level = Column(Enum("low", "medium", "high", name="ai_confidence_levels"), nullable=True)
+    ai_confidence_level = Column(Enum("low", "medium", "high", name="ai_confidence_levels"), nullable=True, index=True)
     ai_grading_rationale = Column(Text, nullable=True)
     ai_explanation = Column(Text, nullable=True)
     teacher_notes = Column(Text, nullable=True)

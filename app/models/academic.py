@@ -11,7 +11,7 @@ class Class(Base):
     name = Column(String(100), nullable=False)
     grade_level = Column(String(20), nullable=False)
     academic_year = Column(String(20), nullable=False)
-    created_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -25,7 +25,7 @@ class ClassMember(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     role = Column(Enum("teacher", "student", name="class_member_roles"), nullable=False)
     joined_at = Column(DateTime, default=datetime.utcnow)
 

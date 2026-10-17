@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -211,6 +211,10 @@ def test_finance_analytics_null_created_at_handled_honestly(db_session, mock_sup
     )
     db_session.add(t)
     db_session.commit()
+    # Explicitly clear created_at since default=datetime.utcnow populates it on insert
+    db_session.execute(text("UPDATE tenants SET created_at = NULL WHERE id = 10"))
+    db_session.commit()
+    db_session.expire_all()
 
     response = get_superadmin_finance_analytics(db=db_session, current_user=mock_superadmin)
     data = response.data

@@ -15,21 +15,23 @@ class Tenant(Base):
         Enum("starter", "pro", "enterprise", name="tenant_plans"),
         default="pro",
         nullable=False,
+        index=True,
     )
     subscription_status = Column(
         Enum("active", "trial", "past_due", "canceled", name="tenant_subscription_statuses"),
         default="active",
         nullable=False,
+        index=True,
     )
     max_students = Column(Integer, default=500, nullable=False)
     max_teachers = Column(Integer, default=50, nullable=False)
     max_storage_gb = Column(Integer, default=10, nullable=False)
     ai_credits_monthly = Column(Integer, default=1000, nullable=False)
     ai_credits_used = Column(Integer, default=0, nullable=False)
-    is_active = Column(Boolean, default=True, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
     subscription_due_date = Column(DateTime, nullable=True)
     grace_period_ends = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships

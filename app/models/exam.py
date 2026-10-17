@@ -8,8 +8,8 @@ class Exam(Base):
     __tablename__ = "exams"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    teacher_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    class_id = Column(Integer, ForeignKey("classes.id", ondelete="RESTRICT"), nullable=False)
+    teacher_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    class_id = Column(Integer, ForeignKey("classes.id", ondelete="RESTRICT"), nullable=False, index=True)
     title = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
     duration_minutes = Column(Integer, nullable=False)
@@ -28,6 +28,7 @@ class Exam(Base):
     status = Column(
         Enum("draft", "published", "in_progress", "completed", "archived", name="exam_statuses"),
         default="draft",
+        index=True,
     )
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -48,7 +49,7 @@ class ExamQuestion(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     exam_id = Column(Integer, ForeignKey("exams.id", ondelete="CASCADE"), nullable=False)
-    question_id = Column(Integer, ForeignKey("questions.id", ondelete="CASCADE"), nullable=False)
+    question_id = Column(Integer, ForeignKey("questions.id", ondelete="CASCADE"), nullable=False, index=True)
     order_index = Column(Integer, nullable=False)
     allocated_points = Column(Numeric(5, 2), nullable=False, default=10.00)
 

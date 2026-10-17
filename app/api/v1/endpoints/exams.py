@@ -1,9 +1,10 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, status
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import get_current_active_user, require_teacher
+from app.core.timing import log_query_timing
 from app.models.user import User
 from app.models.academic import Class, ClassMember
 from app.models.exam import Exam, ExamQuestion
@@ -17,7 +18,7 @@ from app.schemas.exam import (
     ExamQuestionResponse,
 )
 from app.schemas.question import QuestionResponse
-from app.schemas.common import ApiResponse
+from app.schemas.common import ApiResponse, PaginatedResponse
 
 router = APIRouter(prefix="/exams", tags=["Exam Management & Publishing"])
 
@@ -51,21 +52,51 @@ def build_exam_response(
     )
 
 
-@router.get("", response_model=ApiResponse[List[ExamResponse]])
+@router.get("", response_model=PaginatedResponse[ExamResponse])
 def list_exams(
+    page: int = Query(1, ge=1, description="Nomor halaman"),
+    page_size: int = Query(20, ge=1, le=100, description="Jumlah data per halaman"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    if current_user.role == "admin":
-        exams = db.query(Exam).all()
-    elif current_user.role == "teacher":
-        exams = db.query(Exam).filter(Exam.teacher_id == current_user.id).all()
-    else:  # student
-        class_ids = [m.class_id for m in db.query(ClassMember).filter(ClassMember.user_id == current_user.id).all()]
-        exams = db.query(Exam).filter(Exam.class_id.in_(class_ids), Exam.status.in_(["published", "in_progress", "completed"])).all() if class_ids else []
+    with log_query_timing("list_exams"):
+        if current_user.role == "admin":
+            query = db.query(Exam)
+        elif current_user.role == "teacher":
+            query = db.query(Exam).filter(Exam.teacher_id == current_user.id)
+        else:  # student
+            class_ids = [m.class_id for m in db.query(ClassMember).filter(ClassMember.user_id == current_user.id).all()]
+            if not class_ids:
+                return PaginatedResponse.ok(
+                    data=[],
+                    page=page,
+                    page_size=page_size,
+                    total=0,
+                    message="Daftar paket ujian berhasil dimuat",
+                )
+            query = db.query(Exam).filter(Exam.class_id.in_(class_ids), Exam.status.in_(["published", "in_progress", "completed"]))
 
-    results = [build_exam_response(e) for e in exams]
-    return ApiResponse.ok(data=results, message="Daftar paket ujian berhasil dimuat")
+        total = query.count()
+        exams = (
+            query.options(
+                joinedload(Exam.teacher),
+                joinedload(Exam.class_),
+                selectinload(Exam.exam_questions),
+            )
+            .order_by(Exam.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+
+        results = [build_exam_response(e) for e in exams]
+        return PaginatedResponse.ok(
+            data=results,
+            page=page,
+            page_size=page_size,
+            total=total,
+            message="Daftar paket ujian berhasil dimuat",
+        )
 
 
 @router.post("", response_model=ApiResponse[ExamResponse])

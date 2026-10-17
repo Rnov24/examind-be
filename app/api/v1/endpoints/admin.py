@@ -1,20 +1,21 @@
 import time
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy import text
+from sqlalchemy import text, func
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import require_admin
 from app.core.security import get_password_hash
+from app.core.timing import log_query_timing
 from app.models.user import User
 from app.models.academic import Class
 from app.models.question import QuestionBank
 from app.models.exam import Exam
 from app.models.session import ExamSession
 from app.schemas.auth import UserResponse
-from app.schemas.common import ApiResponse
+from app.schemas.common import ApiResponse, PaginatedResponse
 from app.services.proctoring.websocket_hub import ws_hub
 
 router = APIRouter(prefix="/admin", tags=["Admin Management"])
@@ -50,63 +51,84 @@ def get_admin_stats(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    # Measure real database round-trip latency
-    t0 = time.perf_counter()
-    db.execute(text("SELECT 1"))
-    latency_ms = (time.perf_counter() - t0) * 1000.0
+    with log_query_timing("get_admin_stats"):
+        # Measure real database round-trip latency
+        t0 = time.perf_counter()
+        db.execute(text("SELECT 1"))
+        latency_ms = (time.perf_counter() - t0) * 1000.0
 
-    users = db.query(User).all()
-    total_admins = sum(1 for u in users if u.role == "admin")
-    total_teachers = sum(1 for u in users if u.role == "teacher")
-    total_students = sum(1 for u in users if u.role == "student")
+        user_counts = dict(
+            db.query(User.role, func.count(User.id)).group_by(User.role).all()
+        )
+        total_users = sum(user_counts.values())
+        total_admins = user_counts.get("admin", 0)
+        total_teachers = user_counts.get("teacher", 0)
+        total_students = user_counts.get("student", 0)
 
-    total_classes = db.query(Class).count()
-    total_banks = db.query(QuestionBank).count()
-    total_exams = db.query(Exam).count()
+        total_classes = db.query(Class).count()
+        total_banks = db.query(QuestionBank).count()
+        total_exams = db.query(Exam).count()
 
-    sessions = db.query(ExamSession).all()
-    total_sessions = len(sessions)
-    active_sessions = sum(1 for s in sessions if s.status in ["in_progress", "ready"])
-    completed_sessions = sum(1 for s in sessions if s.status in ["submitted", "graded"])
-    disqualified_sessions = sum(1 for s in sessions if s.status == "disqualified")
+        session_counts = dict(
+            db.query(ExamSession.status, func.count(ExamSession.id)).group_by(ExamSession.status).all()
+        )
+        total_sessions = sum(session_counts.values())
+        active_sessions = session_counts.get("in_progress", 0) + session_counts.get("ready", 0)
+        completed_sessions = session_counts.get("submitted", 0) + session_counts.get("graded", 0)
+        disqualified_sessions = session_counts.get("disqualified", 0)
 
-    active_cameras = len(ws_hub.companion_streams)
+        active_cameras = len(ws_hub.companion_streams)
 
-    stats = AdminStatsResponse(
-        total_users=len(users),
-        total_admins=total_admins,
-        total_teachers=total_teachers,
-        total_students=total_students,
-        total_classes=total_classes,
-        total_question_banks=total_banks,
-        total_exams=total_exams,
-        total_sessions=total_sessions,
-        active_sessions=active_sessions,
-        completed_sessions=completed_sessions,
-        disqualified_sessions=disqualified_sessions,
-        database_status=f"Connected ({latency_ms:.0f} ms)",
-        edge_cv_status=f"{active_cameras} kamera terhubung",
-    )
-    return ApiResponse.ok(data=stats, message="Statistik institusi berhasil dimuat")
+        stats = AdminStatsResponse(
+            total_users=total_users,
+            total_admins=total_admins,
+            total_teachers=total_teachers,
+            total_students=total_students,
+            total_classes=total_classes,
+            total_question_banks=total_banks,
+            total_exams=total_exams,
+            total_sessions=total_sessions,
+            active_sessions=active_sessions,
+            completed_sessions=completed_sessions,
+            disqualified_sessions=disqualified_sessions,
+            database_status=f"Connected ({latency_ms:.0f} ms)",
+            edge_cv_status=f"{active_cameras} kamera terhubung",
+        )
+        return ApiResponse.ok(data=stats, message="Statistik institusi berhasil dimuat")
 
 
-@router.get("/users", response_model=ApiResponse[List[UserResponse]])
+@router.get("/users", response_model=PaginatedResponse[UserResponse])
 def list_users(
     role: Optional[str] = Query(None, description="Filter role (admin, teacher, student)"),
     search: Optional[str] = Query(None, description="Pencarian nama atau identifier"),
+    page: int = Query(1, ge=1, description="Nomor halaman"),
+    page_size: int = Query(20, ge=1, le=100, description="Jumlah data per halaman"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
-    query = db.query(User)
-    if role and role != "all":
-        query = query.filter(User.role == role)
-    if search:
-        s = f"%{search}%"
-        query = query.filter((User.full_name.ilike(s)) | (User.identifier.ilike(s)) | (User.email.ilike(s)))
+    with log_query_timing("list_users"):
+        query = db.query(User)
+        if role and role != "all":
+            query = query.filter(User.role == role)
+        if search:
+            s = f"%{search}%"
+            query = query.filter((User.full_name.ilike(s)) | (User.identifier.ilike(s)) | (User.email.ilike(s)))
 
-    users = query.order_by(User.id.desc()).all()
-    results = [UserResponse.model_validate(u) for u in users]
-    return ApiResponse.ok(data=results, message="Daftar pengguna berhasil dimuat")
+        total = query.count()
+        users = (
+            query.order_by(User.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        results = [UserResponse.model_validate(u) for u in users]
+        return PaginatedResponse.ok(
+            data=results,
+            page=page,
+            page_size=page_size,
+            total=total,
+            message="Daftar pengguna berhasil dimuat",
+        )
 
 
 @router.post("/users", response_model=ApiResponse[UserResponse])

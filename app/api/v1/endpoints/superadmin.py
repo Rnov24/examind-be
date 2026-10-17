@@ -4,13 +4,15 @@ from datetime import datetime, timedelta
 import httpx
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import func, case
+from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import require_superadmin, require_admin
 from app.core.security import get_password_hash
 from app.core.secret_manager import encrypt_secret, decrypt_secret, mask_secret, get_secret
+from app.core.cache import memory_cache
+from app.core.timing import log_query_timing
 from app.models.tenant import Tenant, TenantRegistrationCode
 from app.models.user import User
 from app.models.exam import Exam
@@ -27,7 +29,7 @@ from app.schemas.secret import (
     TestSecretRequest,
     TestSecretResponse,
 )
-from app.schemas.common import ApiResponse
+from app.schemas.common import ApiResponse, PaginatedResponse
 
 router = APIRouter(prefix="/superadmin", tags=["SaaS & Platform Super Admin"])
 
@@ -37,109 +39,149 @@ def get_superadmin_global_stats(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_superadmin),
 ):
-    tenants = db.query(Tenant).all()
-    total_tenants = len(tenants)
-    active_tenants = sum(1 for t in tenants if t.is_active)
+    is_sqlite = db.bind is not None and "sqlite" in db.bind.dialect.name
+    cache_key = "superadmin:global_stats"
+    if not is_sqlite:
+        cached = memory_cache.get(cache_key)
+        if cached:
+            return ApiResponse.ok(data=cached, message="Statistik global SaaS berhasil dimuat")
 
-    plan_counts = {"starter": 0, "pro": 0, "enterprise": 0}
-    total_ai_credits = 0
-    for t in tenants:
-        plan_counts[t.subscription_plan] = plan_counts.get(t.subscription_plan, 0) + 1
-        total_ai_credits += int(t.ai_credits_used or 0)
+    with log_query_timing("get_superadmin_global_stats"):
+        tenant_summary = db.query(
+            func.count(Tenant.id),
+            func.sum(case((Tenant.is_active == True, 1), else_=0)),
+            func.sum(func.coalesce(Tenant.ai_credits_used, 0)),
+        ).first()
+        total_tenants = tenant_summary[0] or 0
+        active_tenants = int(tenant_summary[1] or 0)
+        total_ai_credits = int(tenant_summary[2] or 0)
 
-    # Use database aggregation instead of loading all users into memory
-    user_counts_by_role = dict(db.query(User.role, func.count(User.id)).group_by(User.role).all())
-    total_users = sum(user_counts_by_role.values())
-    total_students = user_counts_by_role.get("student", 0)
-    total_teachers = user_counts_by_role.get("teacher", 0)
-    total_exams = db.query(Exam).count()
+        raw_plan_counts = dict(
+            db.query(Tenant.subscription_plan, func.count(Tenant.id))
+            .group_by(Tenant.subscription_plan)
+            .all()
+        )
+        plan_counts = {
+            "starter": raw_plan_counts.get("starter", 0),
+            "pro": raw_plan_counts.get("pro", 0),
+            "enterprise": raw_plan_counts.get("enterprise", 0),
+        }
 
-    stats = SuperAdminStatsResponse(
-        total_tenants=total_tenants,
-        active_tenants=active_tenants,
-        plan_distribution=plan_counts,
-        total_global_users=total_users,
-        total_global_students=total_students,
-        total_global_teachers=total_teachers,
-        total_global_exams=total_exams,
-        total_ai_credits_used=total_ai_credits,
-        server_status="Optimal (FastAPI + MySQL Multi-Tenant)",
-    )
-    return ApiResponse.ok(data=stats, message="Statistik global SaaS berhasil dimuat")
+        # Use database aggregation instead of loading all users into memory
+        user_counts_by_role = dict(db.query(User.role, func.count(User.id)).group_by(User.role).all())
+        total_users = sum(user_counts_by_role.values())
+        total_students = user_counts_by_role.get("student", 0)
+        total_teachers = user_counts_by_role.get("teacher", 0)
+        total_exams = db.query(Exam).count()
+
+        stats = SuperAdminStatsResponse(
+            total_tenants=total_tenants,
+            active_tenants=active_tenants,
+            plan_distribution=plan_counts,
+            total_global_users=total_users,
+            total_global_students=total_students,
+            total_global_teachers=total_teachers,
+            total_global_exams=total_exams,
+            total_ai_credits_used=total_ai_credits,
+            server_status="Optimal (FastAPI + MySQL Multi-Tenant)",
+        )
+
+        if not is_sqlite:
+            memory_cache.set(cache_key, stats, ttl=60)
+
+        return ApiResponse.ok(data=stats, message="Statistik global SaaS berhasil dimuat")
 
 
-@router.get("/tenants", response_model=ApiResponse[List[TenantResponse]])
+@router.get("/tenants", response_model=PaginatedResponse[TenantResponse])
 def get_all_tenants(
     search: Optional[str] = Query(None, description="Cari nama atau kode sekolah"),
     plan: Optional[str] = Query(None, description="Filter paket: starter, pro, enterprise"),
     subscription_status: Optional[str] = Query(None, description="Filter status langganan"),
+    page: int = Query(1, ge=1, description="Nomor halaman"),
+    page_size: int = Query(20, ge=1, le=100, description="Jumlah data per halaman"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_superadmin),
 ):
-    query = db.query(Tenant)
-    if search:
-        kw = f"%{search}%"
-        query = query.filter((Tenant.name.ilike(kw)) | (Tenant.code.ilike(kw)))
-    if plan:
-        query = query.filter(Tenant.subscription_plan == plan)
-    if subscription_status:
-        query = query.filter(Tenant.subscription_status == subscription_status)
+    with log_query_timing("get_all_tenants"):
+        query = db.query(Tenant)
+        if search:
+            kw = f"%{search}%"
+            query = query.filter((Tenant.name.ilike(kw)) | (Tenant.code.ilike(kw)))
+        if plan:
+            query = query.filter(Tenant.subscription_plan == plan)
+        if subscription_status:
+            query = query.filter(Tenant.subscription_status == subscription_status)
 
-    tenants = query.order_by(Tenant.created_at.desc()).all()
-
-    # Pre-aggregate user counts per tenant in single SQL query (O(1) roundtrip)
-    user_counts = (
-        db.query(User.tenant_id, User.role, func.count(User.id))
-        .filter(User.tenant_id.isnot(None))
-        .group_by(User.tenant_id, User.role)
-        .all()
-    )
-    user_stats = {}
-    for tid, role, cnt in user_counts:
-        if tid not in user_stats:
-            user_stats[tid] = {"student": 0, "teacher": 0, "total": 0}
-        user_stats[tid][role] = cnt
-        user_stats[tid]["total"] += cnt
-
-    # Pre-aggregate exam counts per tenant in single SQL query
-    exam_counts = (
-        db.query(User.tenant_id, func.count(Exam.id))
-        .join(User, Exam.teacher_id == User.id)
-        .filter(User.tenant_id.isnot(None))
-        .group_by(User.tenant_id)
-        .all()
-    )
-    exam_stats = dict(exam_counts)
-
-    result = []
-    for t in tenants:
-        t_user_stat = user_stats.get(t.id, {"student": 0, "teacher": 0, "total": 0})
-        t_exams = exam_stats.get(t.id, 0)
-
-        res_item = TenantResponse(
-            id=t.id,
-            name=t.name,
-            code=t.code,
-            domain=t.domain,
-            subscription_plan=t.subscription_plan,
-            subscription_status=t.subscription_status,
-            max_students=t.max_students,
-            max_teachers=t.max_teachers,
-            max_storage_gb=t.max_storage_gb,
-            ai_credits_monthly=t.ai_credits_monthly,
-            ai_credits_used=t.ai_credits_used,
-            is_active=t.is_active,
-            subscription_due_date=t.subscription_due_date,
-            grace_period_ends=t.grace_period_ends,
-            created_at=t.created_at,
-            total_users=t_user_stat["total"],
-            total_students=t_user_stat["student"],
-            total_teachers=t_user_stat["teacher"],
-            total_exams=t_exams,
+        total = query.count()
+        tenants = (
+            query.order_by(Tenant.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
         )
-        result.append(res_item)
+        tenant_ids = [t.id for t in tenants]
 
-    return ApiResponse.ok(data=result, message="Daftar tenant sekolah berhasil dimuat")
+        # Pre-aggregate user counts only for current page tenants in single SQL query
+        user_stats = {}
+        exam_stats = {}
+        if tenant_ids:
+            user_counts = (
+                db.query(User.tenant_id, User.role, func.count(User.id))
+                .filter(User.tenant_id.in_(tenant_ids))
+                .group_by(User.tenant_id, User.role)
+                .all()
+            )
+            for tid, role, cnt in user_counts:
+                if tid not in user_stats:
+                    user_stats[tid] = {"student": 0, "teacher": 0, "total": 0}
+                user_stats[tid][role] = cnt
+                user_stats[tid]["total"] += cnt
+
+            # Pre-aggregate exam counts only for current page tenants in single SQL query
+            exam_counts = (
+                db.query(User.tenant_id, func.count(Exam.id))
+                .join(User, Exam.teacher_id == User.id)
+                .filter(User.tenant_id.in_(tenant_ids))
+                .group_by(User.tenant_id)
+                .all()
+            )
+            exam_stats = dict(exam_counts)
+
+        result = []
+        for t in tenants:
+            t_user_stat = user_stats.get(t.id, {"student": 0, "teacher": 0, "total": 0})
+            t_exams = exam_stats.get(t.id, 0)
+
+            res_item = TenantResponse(
+                id=t.id,
+                name=t.name,
+                code=t.code,
+                domain=t.domain,
+                subscription_plan=t.subscription_plan,
+                subscription_status=t.subscription_status,
+                max_students=t.max_students,
+                max_teachers=t.max_teachers,
+                max_storage_gb=t.max_storage_gb,
+                ai_credits_monthly=t.ai_credits_monthly,
+                ai_credits_used=t.ai_credits_used,
+                is_active=t.is_active,
+                subscription_due_date=t.subscription_due_date,
+                grace_period_ends=t.grace_period_ends,
+                created_at=t.created_at,
+                total_users=t_user_stat["total"],
+                total_students=t_user_stat["student"],
+                total_teachers=t_user_stat["teacher"],
+                total_exams=t_exams,
+            )
+            result.append(res_item)
+
+        return PaginatedResponse.ok(
+            data=result,
+            page=page,
+            page_size=page_size,
+            total=total,
+            message="Daftar tenant sekolah berhasil dimuat",
+        )
 
 
 @router.post("/tenants", response_model=ApiResponse[TenantResponse], status_code=status.HTTP_201_CREATED)
@@ -709,7 +751,15 @@ def get_superadmin_finance_analytics(
     current_user: User = Depends(require_superadmin),
 ):
     """Retrieve comprehensive SaaS financial metrics: MRR, ARR, plan breakdowns, and transaction ledger."""
-    tenants = db.query(Tenant).all()
+    is_sqlite = db.bind is not None and "sqlite" in db.bind.dialect.name
+    cache_key = "superadmin:finance_analytics"
+    if not is_sqlite:
+        cached = memory_cache.get(cache_key)
+        if cached:
+            return ApiResponse.ok(data=cached, message="Data finansial SaaS dan MRR berhasil dimuat")
+
+    with log_query_timing("get_superadmin_finance_analytics"):
+        tenants = db.query(Tenant).all()
 
     # Plan rates (in IDR)
     PLAN_PRICES = {
@@ -831,23 +881,27 @@ def get_superadmin_finance_analytics(
     else:
         growth_rate_mom = 0.0
 
+    data_payload = {
+        "mrr": mrr,
+        "arr": arr,
+        "arpu": arpu,
+        "active_tenants": active_count,
+        "paying_tenants": active_count,
+        "growth_rate_mom": growth_rate_mom,
+        "churn_rate": 0.0,
+        "plan_revenue": plan_revenue,
+        "plan_distribution": plan_distribution,
+        "plans_breakdown": plans_breakdown,
+        "mrr_history": mrr_history,
+        "historical_mrr": mrr_history,
+        "recent_invoices": recent_invoices,
+        "invoices": recent_invoices,
+    }
+    if not is_sqlite:
+        memory_cache.set(cache_key, data_payload, ttl=60)
+
     return ApiResponse.ok(
-        data={
-            "mrr": mrr,
-            "arr": arr,
-            "arpu": arpu,
-            "active_tenants": active_count,
-            "paying_tenants": active_count,
-            "growth_rate_mom": growth_rate_mom,
-            "churn_rate": 0.0,
-            "plan_revenue": plan_revenue,
-            "plan_distribution": plan_distribution,
-            "plans_breakdown": plans_breakdown,
-            "mrr_history": mrr_history,
-            "historical_mrr": mrr_history,
-            "recent_invoices": recent_invoices,
-            "invoices": recent_invoices,
-        },
+        data=data_payload,
         message="Data finansial SaaS dan MRR berhasil dimuat",
     )
 
@@ -1064,39 +1118,55 @@ class RegistrationCodeCreate(BaseModel):
     max_uses: int = 0
 
 
-@router.get("/registration-codes")
+@router.get("/registration-codes", response_model=PaginatedResponse[dict])
 def list_registration_codes(
     tenant_id: Optional[int] = Query(None),
     role: Optional[str] = Query(None),
+    page: int = Query(1, ge=1, description="Nomor halaman"),
+    page_size: int = Query(20, ge=1, le=100, description="Jumlah data per halaman"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_superadmin),
 ):
     """List all provider registration codes across all schools with tenant details."""
-    query = db.query(TenantRegistrationCode)
-    if tenant_id:
-        query = query.filter(TenantRegistrationCode.tenant_id == tenant_id)
-    if role:
-        query = query.filter(TenantRegistrationCode.role == role)
+    with log_query_timing("list_registration_codes"):
+        query = db.query(TenantRegistrationCode)
+        if tenant_id:
+            query = query.filter(TenantRegistrationCode.tenant_id == tenant_id)
+        if role:
+            query = query.filter(TenantRegistrationCode.role == role)
 
-    records = query.order_by(TenantRegistrationCode.tenant_id.asc(), TenantRegistrationCode.role.asc()).all()
-    results = [
-        {
-            "id": r.id,
-            "tenant_id": r.tenant_id,
-            "tenant_name": r.tenant.name if r.tenant else "Unknown",
-            "tenant_code": r.tenant.code if r.tenant else "",
-            "role": r.role,
-            "code": r.code,
-            "description": r.description,
-            "max_uses": r.max_uses,
-            "used_count": r.used_count,
-            "is_active": r.is_active,
-            "expires_at": r.expires_at,
-            "created_at": r.created_at,
-        }
-        for r in records
-    ]
-    return ApiResponse.ok(data=results, message="Daftar kode registrasi sekolah berhasil dimuat")
+        total = query.count()
+        records = (
+            query.options(joinedload(TenantRegistrationCode.tenant))
+            .order_by(TenantRegistrationCode.tenant_id.asc(), TenantRegistrationCode.role.asc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        results = [
+            {
+                "id": r.id,
+                "tenant_id": r.tenant_id,
+                "tenant_name": r.tenant.name if r.tenant else "Unknown",
+                "tenant_code": r.tenant.code if r.tenant else "",
+                "role": r.role,
+                "code": r.code,
+                "description": r.description,
+                "max_uses": r.max_uses,
+                "used_count": r.used_count,
+                "is_active": r.is_active,
+                "expires_at": r.expires_at,
+                "created_at": r.created_at,
+            }
+            for r in records
+        ]
+        return PaginatedResponse.ok(
+            data=results,
+            page=page,
+            page_size=page_size,
+            total=total,
+            message="Daftar kode registrasi sekolah berhasil dimuat",
+        )
 
 
 @router.post("/registration-codes")

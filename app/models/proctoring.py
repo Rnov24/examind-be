@@ -8,7 +8,7 @@ class ProctoringLog(Base):
     __tablename__ = "proctoring_logs"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    session_id = Column(Integer, ForeignKey("exam_sessions.id", ondelete="CASCADE"), nullable=False)
+    session_id = Column(Integer, ForeignKey("exam_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
     event_type = Column(
         Enum(
             "face_absent",
@@ -29,11 +29,12 @@ class ProctoringLog(Base):
     severity = Column(Enum("low", "medium", "high", name="violation_severities"), nullable=False)
     duration_seconds = Column(Integer, default=1)
     snapshot_url = Column(String(255), nullable=True)
-    event_timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    event_timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     reviewed_by_teacher = Column(Boolean, default=False)
     teacher_verdict = Column(
         Enum("ignored_false_positive", "confirmed_violation", "pending", name="teacher_verdicts"),
         default="pending",
+        index=True,
     )
 
     # Relationships

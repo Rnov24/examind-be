@@ -8,7 +8,7 @@ class QuestionBank(Base):
     __tablename__ = "question_banks"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    teacher_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    teacher_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String(200), nullable=False)
     subject = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
@@ -23,10 +23,11 @@ class Question(Base):
     __tablename__ = "questions"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    bank_id = Column(Integer, ForeignKey("question_banks.id", ondelete="CASCADE"), nullable=False)
+    bank_id = Column(Integer, ForeignKey("question_banks.id", ondelete="CASCADE"), nullable=False, index=True)
     question_type = Column(
         Enum("multiple_choice", "short_essay", "long_essay", name="question_types"),
         nullable=False,
+        index=True,
     )
     prompt = Column(Text, nullable=False)
     options_json = Column(JSON, nullable=True)  # [{"id":"A","text":"..."},{"id":"B","text":"..."}]

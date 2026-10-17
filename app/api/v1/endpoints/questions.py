@@ -1,9 +1,11 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import get_current_active_user, require_teacher
+from app.core.timing import log_query_timing
 from app.models.user import User
 from app.models.question import QuestionBank, Question
 from app.schemas.question import (
@@ -15,37 +17,65 @@ from app.schemas.question import (
     QuestionUpdate,
     QuestionResponse,
 )
-from app.schemas.common import ApiResponse
+from app.schemas.common import ApiResponse, PaginatedResponse
 
 router = APIRouter(prefix="/questions", tags=["Question Bank & Items"])
 
 
 # --- Question Bank Endpoints ---
 
-@router.get("/banks", response_model=ApiResponse[List[QuestionBankResponse]])
+@router.get("/banks", response_model=PaginatedResponse[QuestionBankResponse])
 def list_question_banks(
+    page: int = Query(1, ge=1, description="Nomor halaman"),
+    page_size: int = Query(20, ge=1, le=100, description="Jumlah data per halaman"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
-    if current_user.role == "admin":
-        banks = db.query(QuestionBank).all()
-    else:
-        banks = db.query(QuestionBank).filter(QuestionBank.teacher_id == current_user.id).all()
+    with log_query_timing("list_question_banks"):
+        if current_user.role == "admin":
+            query = db.query(QuestionBank)
+        else:
+            query = db.query(QuestionBank).filter(QuestionBank.teacher_id == current_user.id)
 
-    results = []
-    for b in banks:
-        res = QuestionBankResponse(
-            id=b.id,
-            teacher_id=b.teacher_id,
-            title=b.title,
-            subject=b.subject,
-            description=b.description,
-            created_at=b.created_at,
-            questions_count=len(b.questions),
+        total = query.count()
+        banks = (
+            query.order_by(QuestionBank.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
         )
-        results.append(res)
 
-    return ApiResponse.ok(data=results, message="Daftar bank soal berhasil dimuat")
+        bank_ids = [b.id for b in banks]
+        question_counts = {}
+        if bank_ids:
+            counts = (
+                db.query(Question.bank_id, func.count(Question.id))
+                .filter(Question.bank_id.in_(bank_ids))
+                .group_by(Question.bank_id)
+                .all()
+            )
+            question_counts = dict(counts)
+
+        results = []
+        for b in banks:
+            res = QuestionBankResponse(
+                id=b.id,
+                teacher_id=b.teacher_id,
+                title=b.title,
+                subject=b.subject,
+                description=b.description,
+                created_at=b.created_at,
+                questions_count=question_counts.get(b.id, 0),
+            )
+            results.append(res)
+
+        return PaginatedResponse.ok(
+            data=results,
+            page=page,
+            page_size=page_size,
+            total=total,
+            message="Daftar bank soal berhasil dimuat",
+        )
 
 
 @router.post("/banks", response_model=ApiResponse[QuestionBankResponse])

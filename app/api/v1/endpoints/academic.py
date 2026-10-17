@@ -1,9 +1,10 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, status
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import get_current_active_user, require_teacher, require_teacher_or_admin
+from app.core.timing import log_query_timing
 from app.models.user import User
 from app.models.academic import Class, ClassMember
 from app.schemas.academic import (
@@ -15,39 +16,68 @@ from app.schemas.academic import (
     ClassMemberResponse,
 )
 from app.schemas.auth import UserResponse
-from app.schemas.common import ApiResponse
+from app.schemas.common import ApiResponse, PaginatedResponse
 
 router = APIRouter(prefix="/classes", tags=["Classes & Academics"])
 
 
-@router.get("", response_model=ApiResponse[List[ClassResponse]])
+@router.get("", response_model=PaginatedResponse[ClassResponse])
 def get_classes(
+    page: int = Query(1, ge=1, description="Nomor halaman"),
+    page_size: int = Query(20, ge=1, le=100, description="Jumlah data per halaman"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    if current_user.role == "admin":
-        classes = db.query(Class).all()
-    elif current_user.role == "teacher":
-        classes = db.query(Class).filter(Class.created_by == current_user.id).all()
-    else:  # student
-        class_ids = [m.class_id for m in db.query(ClassMember).filter(ClassMember.user_id == current_user.id).all()]
-        classes = db.query(Class).filter(Class.id.in_(class_ids)).all() if class_ids else []
+    with log_query_timing("get_classes"):
+        if current_user.role == "admin":
+            query = db.query(Class)
+        elif current_user.role == "teacher":
+            query = db.query(Class).filter(Class.created_by == current_user.id)
+        else:  # student
+            class_ids = [m.class_id for m in db.query(ClassMember).filter(ClassMember.user_id == current_user.id).all()]
+            if not class_ids:
+                return PaginatedResponse.ok(
+                    data=[],
+                    page=page,
+                    page_size=page_size,
+                    total=0,
+                    message="Daftar kelas berhasil dimuat",
+                )
+            query = db.query(Class).filter(Class.id.in_(class_ids))
 
-    results = []
-    for c in classes:
-        res = ClassResponse(
-            id=c.id,
-            name=c.name,
-            grade_level=c.grade_level,
-            academic_year=c.academic_year,
-            created_by=c.created_by,
-            created_at=c.created_at,
-            members_count=len(c.members),
-            creator_name=c.creator.full_name if c.creator else None,
+        total = query.count()
+        classes = (
+            query.options(
+                joinedload(Class.creator),
+                selectinload(Class.members),
+            )
+            .order_by(Class.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
         )
-        results.append(res)
 
-    return ApiResponse.ok(data=results, message="Daftar kelas berhasil dimuat")
+        results = []
+        for c in classes:
+            res = ClassResponse(
+                id=c.id,
+                name=c.name,
+                grade_level=c.grade_level,
+                academic_year=c.academic_year,
+                created_by=c.created_by,
+                created_at=c.created_at,
+                members_count=len(c.members),
+                creator_name=c.creator.full_name if c.creator else None,
+            )
+            results.append(res)
+
+        return PaginatedResponse.ok(
+            data=results,
+            page=page,
+            page_size=page_size,
+            total=total,
+            message="Daftar kelas berhasil dimuat",
+        )
 
 
 @router.post("", response_model=ApiResponse[ClassResponse])
@@ -283,11 +313,27 @@ def remove_class_member(
     return ApiResponse.ok(data={"removed_user_id": user_id}, message="Anggota berhasil dikeluarkan dari kelas")
 
 
-@router.get("/users/students", response_model=ApiResponse[List[UserResponse]])
+@router.get("/users/students", response_model=PaginatedResponse[UserResponse])
 def get_all_students(
+    page: int = Query(1, ge=1, description="Nomor halaman"),
+    page_size: int = Query(20, ge=1, le=100, description="Jumlah data per halaman"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
-    students = db.query(User).filter(User.role == "student", User.is_active == True).all()
-    results = [UserResponse.model_validate(s) for s in students]
-    return ApiResponse.ok(data=results, message="Daftar siswa berhasil dimuat")
+    with log_query_timing("get_all_students"):
+        query = db.query(User).filter(User.role == "student", User.is_active == True)
+        total = query.count()
+        students = (
+            query.order_by(User.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        results = [UserResponse.model_validate(s) for s in students]
+        return PaginatedResponse.ok(
+            data=results,
+            page=page,
+            page_size=page_size,
+            total=total,
+            message="Daftar siswa berhasil dimuat",
+        )
