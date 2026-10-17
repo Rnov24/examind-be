@@ -385,12 +385,18 @@ async def send_otp(request: Request, payload: SendOtpRequest, db: Session = Depe
     db.commit()
 
     # Send email via Resend API (or mock fallback if unconfigured)
-    await send_otp_email(
+    result = await send_otp_email(
         to_email=str(payload.email),
         otp_code=otp_code,
         purpose=payload.purpose,
         expires_in_minutes=expires_in_minutes,
     )
+    if (result or {}).get("mock") and settings.ENVIRONMENT == "production":
+        raise AppException(
+            message="Layanan email belum dikonfigurasi di server. Silakan hubungi administrator.",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            error_code="EMAIL_SERVICE_UNCONFIGURED",
+        )
 
     response_data = SendOtpResponse(
         success=True,
@@ -543,13 +549,19 @@ async def forgot_password(request: Request, payload: ForgotPasswordRequest, db: 
     reset_url = f"{frontend_base}/reset-password?token={reset_token}&email={user.email}"
 
     # Dispatch email via Resend API
-    await send_password_reset_email(
+    result = await send_password_reset_email(
         to_email=user.email,
         user_name=user.full_name,
         reset_url=reset_url,
         token_code=short_code,
         expires_in_minutes=expires_in_minutes,
     )
+    if (result or {}).get("mock") and settings.ENVIRONMENT == "production":
+        raise AppException(
+            message="Layanan email belum dikonfigurasi di server. Silakan hubungi administrator.",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            error_code="EMAIL_SERVICE_UNCONFIGURED",
+        )
 
     # Provide development preview payload for local testing without physical inboxes
     dev_preview = None
