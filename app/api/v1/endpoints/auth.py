@@ -28,6 +28,7 @@ from app.schemas.auth import (
     VerifyRegistrationCodeRequest,
     VerifyRegistrationCodeResponse,
     SchoolRegisterRequest,
+    RegisterResponse,
 )
 from app.schemas.verification import SendOtpRequest, SendOtpResponse, VerifyOtpRequest, VerifyOtpResponse
 from app.schemas.common import ApiResponse
@@ -66,6 +67,13 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
             message="Akun Anda sedang dinonaktifkan. Hubungi administrator.",
             status_code=status.HTTP_403_FORBIDDEN,
             error_code="ACCOUNT_INACTIVE",
+        )
+
+    if not user.is_email_verified:
+        raise AppException(
+            message="Email Anda belum diverifikasi. Silakan masukkan kode OTP yang dikirim ke email Anda.",
+            status_code=status.HTTP_403_FORBIDDEN,
+            error_code="EMAIL_NOT_VERIFIED",
         )
 
     # Issue JWT token
@@ -211,10 +219,10 @@ def verify_registration_code(request: VerifyRegistrationCodeRequest, db: Session
     )
 
 
-@router.post("/register", response_model=ApiResponse[TokenData])
+@router.post("/register", response_model=ApiResponse[RegisterResponse])
 @limiter.limit("30/minute", key_func=global_key)
 @limiter.limit("5/minute")
-def register(request: Request, payload: SchoolRegisterRequest, db: Session = Depends(get_db)):
+async def register(request: Request, payload: SchoolRegisterRequest, db: Session = Depends(get_db)):
     """Register a new student, teacher, or school admin using a provider-issued role/school code."""
     clean_code = payload.registration_code.strip().upper() if payload.registration_code else ""
     if not clean_code:
@@ -299,20 +307,28 @@ def register(request: Request, payload: SchoolRegisterRequest, db: Session = Dep
             error_code="TENANT_MISMATCH",
         )
 
-    # Check for duplicate identifier or email
-    existing = (
+    # Check for duplicate identifier or email; delete stale unverified accounts to prevent email-squatting
+    existing_users = (
         db.query(User)
         .filter((User.identifier == clean_identifier) | (User.email == clean_email))
-        .first()
+        .all()
     )
-    if existing:
-        raise AppException(
-            message=f"Identifier '{clean_identifier}' atau email '{clean_email}' sudah terdaftar dalam sistem.",
-            status_code=status.HTTP_400_BAD_REQUEST,
-            error_code="USER_ALREADY_EXISTS",
-        )
+    if existing_users:
+        if any(u.is_email_verified for u in existing_users):
+            raise AppException(
+                message=f"Identifier '{clean_identifier}' atau email '{clean_email}' sudah terdaftar dalam sistem.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                error_code="USER_ALREADY_EXISTS",
+            )
+        # All matching users are unverified stale accounts; delete them to allow fresh registration
+        for u in existing_users:
+            logger.info(
+                f"[Register] Menghapus akun belum terverifikasi (id={u.id}, email={u.email}, identifier={u.identifier}) untuk registrasi ulang."
+            )
+            db.delete(u)
+        db.flush()
 
-    # Create new user associated with the tenant and role
+    # Create new user associated with the tenant and role (unverified until OTP is validated)
     new_user = User(
         identifier=clean_identifier,
         email=clean_email,
@@ -322,7 +338,7 @@ def register(request: Request, payload: SchoolRegisterRequest, db: Session = Dep
         tenant_id=reg_code.tenant_id,
         avatar_url=payload.avatar_url,
         is_active=True,
-        is_email_verified=True,
+        is_email_verified=False,
     )
     db.add(new_user)
 
@@ -332,28 +348,64 @@ def register(request: Request, payload: SchoolRegisterRequest, db: Session = Dep
     db.commit()
     db.refresh(new_user)
 
-    # Issue JWT token for immediate login
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    token_payload = {
-        "sub": str(new_user.id),
-        "identifier": new_user.identifier,
-        "email": new_user.email,
-        "role": new_user.role,
-        "full_name": new_user.full_name,
-    }
-    access_token = create_access_token(token_payload, expires_delta=access_token_expires)
+    # Send verification OTP (purpose: "email_verification", 10 min expiry)
+    try:
+        # Invalidate previous unused codes for the same email and purpose
+        db.query(EmailVerification).filter(
+            EmailVerification.email == clean_email,
+            EmailVerification.purpose == "email_verification",
+            EmailVerification.is_used == False,
+        ).update({"is_used": True})
 
-    token_data = TokenData(
-        access_token=access_token,
-        token_type="bearer",
-        expires_in_minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES,
-        user=UserResponse.model_validate(new_user),
+        otp_code = generate_otp(6)
+        expires_in_minutes = 10
+        expires_at = datetime.utcnow() + timedelta(minutes=expires_in_minutes)
+
+        verification = EmailVerification(
+            email=clean_email,
+            otp_code=otp_code,
+            purpose="email_verification",
+            expires_at=expires_at,
+            is_used=False,
+        )
+        db.add(verification)
+        db.commit()
+
+        # Send email via Resend API (or mock fallback if unconfigured)
+        result = await send_otp_email(
+            to_email=clean_email,
+            otp_code=otp_code,
+            purpose="email_verification",
+            expires_in_minutes=expires_in_minutes,
+        )
+        if (result or {}).get("mock") and settings.ENVIRONMENT == "production":
+            raise AppException(
+                message="Layanan email belum dikonfigurasi di server. Silakan hubungi administrator.",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                error_code="EMAIL_SERVICE_UNCONFIGURED",
+            )
+    except Exception as exc:
+        logger.error(
+            f"[Register] Gagal mengirim OTP email untuk {clean_email}, membatalkan pembuatan user: {exc}"
+        )
+        try:
+            db.delete(new_user)
+            if reg_code.used_count > 0:
+                reg_code.used_count -= 1
+            db.commit()
+        except Exception as rollback_err:
+            logger.error(f"[Register] Gagal membersihkan user saat rollback: {rollback_err}")
+            db.rollback()
+        raise
+
+    response_data = RegisterResponse(
+        requires_verification=True,
+        email=clean_email,
+        expires_in_minutes=10,
     )
-
-    role_label = "Admin Sekolah" if new_user.role == "admin" else "Guru" if new_user.role == "teacher" else "Siswa"
     return ApiResponse.ok(
-        data=token_data,
-        message=f"Pendaftaran sebagai {role_label} di {new_user.tenant_name} berhasil! Anda telah masuk.",
+        data=response_data,
+        message="Pendaftaran berhasil. Kode verifikasi telah dikirim ke email Anda.",
     )
 
 

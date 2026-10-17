@@ -111,3 +111,9 @@ class SchoolRegisterRequest(BaseModel):
     avatar_url: Optional[str] = None
 
 
+class RegisterResponse(BaseModel):
+    requires_verification: bool = True
+    email: str
+    expires_in_minutes: int = 10
+
+

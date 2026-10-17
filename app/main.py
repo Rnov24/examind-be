@@ -9,6 +9,7 @@ from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import settings
+from app.core.edge_guard import EdgeGuardMiddleware
 from app.core.rate_limit import limiter, get_client_ip
 from app.core.exceptions import (
     AppException,
@@ -37,6 +38,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(EdgeGuardMiddleware)
 
 # Register Custom & Global Exception Handlers
 app.state.limiter = limiter

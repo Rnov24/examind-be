@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
 
+    # Cloudflare Edge Lock (origin lock, 2-phase rollout)
+    EDGE_SECRET: str = ""
+    EDGE_ENFORCE: bool = False
+
     # AI Provider
     AI_PROVIDER: str = "gemini"
     AI_API_KEY: str = ""

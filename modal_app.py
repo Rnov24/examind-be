@@ -33,7 +33,7 @@ app = modal.App("examind-be")
 
 @app.function(
     image=image,
-    secrets=[modal.Secret.from_name("examind-env")],
+    secrets=[modal.Secret.from_name("examind-env"), modal.Secret.from_name("examind-edge")],
     scaledown_window=300,  # keep warm 5 min after last request; raise on exam days
     timeout=600,
 )

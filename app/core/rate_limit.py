@@ -14,6 +14,9 @@ from slowapi import Limiter
 
 
 def get_client_ip(request: Request) -> str:
+    # When edge secret is verified, request.client.host was securely patched from CF-Connecting-IP
+    if request.scope.get("edge_verified") and request.client and request.client.host:
+        return request.client.host
     xff = request.headers.get("x-forwarded-for")
     if xff:
         return xff.split(",")[0].strip()
