@@ -22,7 +22,14 @@ class RespanDecisionGrader:
         model: Optional[str] = None,
         timeout_seconds: float = 12.0,
     ):
-        self.api_key = api_key or settings.OPENROUTER_API_KEY
+        # Vault first (settable via Secret Manager UI), then env settings.
+        vault_key = None
+        try:
+            from app.core.secret_manager import get_secret
+            vault_key = get_secret("OPENROUTER_API_KEY")
+        except Exception:
+            vault_key = None
+        self.api_key = api_key or vault_key or settings.OPENROUTER_API_KEY
         self.model = model or getattr(settings, "OPENROUTER_DECISION_MODEL", "respan/span-01-lite")
         self.timeout = timeout_seconds
 
@@ -383,6 +390,7 @@ _respan_grader_instance: Optional[RespanDecisionGrader] = None
 
 def get_respan_grader() -> RespanDecisionGrader:
     global _respan_grader_instance
-    if _respan_grader_instance is None:
+    # Re-create if not configured: the key may have been added via Secret Manager UI after first use.
+    if _respan_grader_instance is None or not _respan_grader_instance.is_configured():
         _respan_grader_instance = RespanDecisionGrader()
     return _respan_grader_instance
