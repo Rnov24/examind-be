@@ -221,7 +221,7 @@ def preview_decision_grading(
 ):
     from app.services.ai.respan_grader import get_respan_grader
 
-    grader = get_respan_grader()
+    grader = get_respan_grader("TASK_SHORT_ANSWER_GRADING")
     rubric = {"ref_points": request.ref_points} if request.ref_points else {}
 
     res = grader.grade_short_answer(

@@ -72,7 +72,7 @@ def check_span_guardrail(message: str) -> Tuple[bool, Optional[str]]:
     try:
         from app.services.ai.respan_grader import get_respan_grader, RespanDecisionGrader
 
-        grader = get_respan_grader()
+        grader = get_respan_grader("TASK_CHATBOT_GUARDRAIL")
         if not grader.is_configured():
             return True, None
 

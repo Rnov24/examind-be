@@ -21,27 +21,29 @@ class RespanDecisionGrader:
         api_key: Optional[str] = None,
         model: Optional[str] = None,
         timeout_seconds: float = 12.0,
+        task_id: Optional[str] = None,
     ):
         # Vault first (settable via Secret Manager UI), then env settings.
+        # task_id selects which task config to read (TASK_SHORT_ANSWER_GRADING or TASK_CHATBOT_GUARDRAIL).
         vault_key = None
         task_model = None
         try:
             from app.core.secret_manager import get_secret
             import json
             vault_key = get_secret("OPENROUTER_API_KEY")
-            # Task-level config override (TASK_SHORT_ANSWER_GUARDRAIL in Secret Manager)
-            task_raw = get_secret("TASK_SHORT_ANSWER_GUARDRAIL")
-            if task_raw:
-                try:
-                    task_cfg = json.loads(task_raw)
-                    if isinstance(task_cfg, dict):
-                        if task_cfg.get("model"):
-                            task_model = task_cfg["model"]
-                        # Task-level dedicated key wins over global vault key
-                        if task_cfg.get("api_key"):
-                            vault_key = task_cfg["api_key"]
-                except Exception:
-                    pass
+            if task_id:
+                task_raw = get_secret(task_id)
+                if task_raw:
+                    try:
+                        task_cfg = json.loads(task_raw)
+                        if isinstance(task_cfg, dict):
+                            if task_cfg.get("model"):
+                                task_model = task_cfg["model"]
+                            # Task-level dedicated key wins over global vault key
+                            if task_cfg.get("api_key"):
+                                vault_key = task_cfg["api_key"]
+                    except Exception:
+                        pass
         except Exception:
             pass
         self.api_key = api_key or vault_key or settings.OPENROUTER_API_KEY
@@ -400,12 +402,16 @@ class RespanDecisionGrader:
 
 
 # Singleton accessor
-_respan_grader_instance: Optional[RespanDecisionGrader] = None
+_respan_grader_instances: dict = {}
 
 
-def get_respan_grader() -> RespanDecisionGrader:
-    global _respan_grader_instance
+def get_respan_grader(task_id: Optional[str] = None) -> RespanDecisionGrader:
+    global _respan_grader_instances
+    # Per-task instances: grading and guardrail can have independent configs.
     # Re-create if not configured: the key may have been added via Secret Manager UI after first use.
-    if _respan_grader_instance is None or not _respan_grader_instance.is_configured():
-        _respan_grader_instance = RespanDecisionGrader()
-    return _respan_grader_instance
+    key = task_id or "default"
+    inst = _respan_grader_instances.get(key)
+    if inst is None or not inst.is_configured():
+        inst = RespanDecisionGrader(task_id=task_id)
+        _respan_grader_instances[key] = inst
+    return inst
