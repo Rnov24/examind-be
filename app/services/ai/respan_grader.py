@@ -24,13 +24,28 @@ class RespanDecisionGrader:
     ):
         # Vault first (settable via Secret Manager UI), then env settings.
         vault_key = None
+        task_model = None
         try:
             from app.core.secret_manager import get_secret
+            import json
             vault_key = get_secret("OPENROUTER_API_KEY")
+            # Task-level config override (TASK_SHORT_ANSWER_GUARDRAIL in Secret Manager)
+            task_raw = get_secret("TASK_SHORT_ANSWER_GUARDRAIL")
+            if task_raw:
+                try:
+                    task_cfg = json.loads(task_raw)
+                    if isinstance(task_cfg, dict):
+                        if task_cfg.get("model"):
+                            task_model = task_cfg["model"]
+                        # Task-level dedicated key wins over global vault key
+                        if task_cfg.get("api_key"):
+                            vault_key = task_cfg["api_key"]
+                except Exception:
+                    pass
         except Exception:
-            vault_key = None
+            pass
         self.api_key = api_key or vault_key or settings.OPENROUTER_API_KEY
-        self.model = model or getattr(settings, "OPENROUTER_DECISION_MODEL", "respan/span-01-lite")
+        self.model = model or task_model or getattr(settings, "OPENROUTER_DECISION_MODEL", "respan/span-01-lite")
         self.timeout = timeout_seconds
 
     def is_configured(self) -> bool:

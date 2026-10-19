@@ -1006,6 +1006,16 @@ DEFAULT_AI_TASKS = [
         "default_max_tokens": 1024,
         "providers_supported": ["gemini", "openai"],
     },
+    {
+        "task_id": "TASK_SHORT_ANSWER_GUARDRAIL",
+        "name": "Short-Answer Guardrail (Respan Decisions)",
+        "description": "Penilaian jawaban singkat via OpenRouter Decisions API (model Respan Span) — dipakai untuk AI short-answer grading dan guardrail.",
+        "default_provider": "openrouter",
+        "default_model": "respan/span-01-lite",
+        "default_temperature": 0.0,
+        "default_max_tokens": 0,
+        "providers_supported": ["openrouter"],
+    },
 ]
 
 @router.get("/secrets/tasks")
