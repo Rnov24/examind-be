@@ -18,6 +18,7 @@ def chat_via_openrouter(
     model: Optional[str] = None,
     temperature: float = 0.5,
     timeout_seconds: float = 30.0,
+    json_mode: bool = False,
 ) -> Optional[str]:
     """Calls OpenRouter chat completions API. Returns reply text or None on failure."""
     if not api_key:
@@ -69,6 +70,8 @@ def chat_via_openrouter(
         "messages": messages,
         "temperature": temperature,
     }
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
 
     try:
         with httpx.Client(timeout=timeout_seconds) as client:

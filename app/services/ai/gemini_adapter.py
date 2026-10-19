@@ -20,6 +20,43 @@ from app.schemas.question import (
 logger = logging.getLogger(__name__)
 
 
+def _route_or_gemini(
+    task_id: str,
+    message: str,
+    history: Optional[List[Dict[str, str]]],
+    system_instruction: Optional[str],
+    json_mode: bool,
+    temperature: float,
+    gemini_fn,
+) -> Optional[str]:
+    """Round-robin across providers when the task's provider is not gemini.
+
+    provider == gemini (or task unconfigured) -> existing Gemini path unchanged.
+    Otherwise route via provider_router round-robin; on total failure fall back
+    to the existing Gemini path.
+    """
+    from app.services.ai.provider_router import get_task_config, route_chat
+    try:
+        provider = (get_task_config(task_id).get("provider") or "gemini").strip().lower()
+    except Exception:
+        provider = "gemini"
+    if provider == "gemini":
+        return gemini_fn()
+    routed = route_chat(
+        task_id=task_id,
+        message=message,
+        history=history,
+        system_instruction=system_instruction,
+        temperature=temperature,
+        json_mode=json_mode,
+        gemini_fn=gemini_fn,
+    )
+    if routed:
+        return routed
+    logger.warning(f"[GeminiAdapter] round-robin failed for {task_id}; falling back to Gemini.")
+    return gemini_fn()
+
+
 class GeminiAdapter(AIServiceInterface):
     """Google Gemini AI Adapter for EXAMIND.
     Uses official Gemini REST API (v1beta) with structured JSON generation.
@@ -185,11 +222,19 @@ class GeminiAdapter(AIServiceInterface):
             f"Tingkat Kesulitan: {request.difficulty}\n"
         )
 
-        raw_json = self._call_gemini(
-            user_prompt,
+        raw_json = _route_or_gemini(
+            task_id="TASK_QUESTION_GEN",
+            message=user_prompt,
+            history=None,
             system_instruction=system_prompt,
             json_mode=True,
-            api_key=request.api_key,
+            temperature=0.2,
+            gemini_fn=lambda: self._call_gemini(
+                user_prompt,
+                system_instruction=system_prompt,
+                json_mode=True,
+                api_key=request.api_key,
+            ),
         )
         if raw_json:
             try:
@@ -305,7 +350,17 @@ class GeminiAdapter(AIServiceInterface):
             f"Jawaban Siswa:\n{student_answer}\n"
         )
 
-        raw_json = self._call_gemini(user_prompt, system_instruction=system_prompt, json_mode=True)
+        raw_json = _route_or_gemini(
+            task_id="TASK_ESSAY_GRADING",
+            message=user_prompt,
+            history=None,
+            system_instruction=system_prompt,
+            json_mode=True,
+            temperature=0.2,
+            gemini_fn=lambda: self._call_gemini(
+                user_prompt, system_instruction=system_prompt, json_mode=True
+            ),
+        )
         if raw_json:
             try:
                 parsed = json.loads(raw_json)
@@ -330,7 +385,17 @@ class GeminiAdapter(AIServiceInterface):
             f"Status: {'BENAR' if is_correct else 'SALAH'}\n"
         )
 
-        text = self._call_gemini(user_prompt, system_instruction=system_prompt, json_mode=False)
+        text = _route_or_gemini(
+            task_id="TASK_QUESTION_GEN",
+            message=user_prompt,
+            history=None,
+            system_instruction=system_prompt,
+            json_mode=False,
+            temperature=0.2,
+            gemini_fn=lambda: self._call_gemini(
+                user_prompt, system_instruction=system_prompt, json_mode=False
+            ),
+        )
         if text:
             return text.strip()
 
@@ -398,30 +463,21 @@ class GeminiAdapter(AIServiceInterface):
         # 2. Build Native Multi-Turn Conversation Memory for Gemini
         gemini_contents = self._format_conversation_contents(history, message)
 
-        # 2b. OpenRouter routing: if TASK_CHATBOT selects openrouter, use it instead of Gemini.
-        try:
-            from app.services.ai.openrouter_chat import should_use_openrouter_for_chatbot, chat_via_openrouter
-            if should_use_openrouter_for_chatbot():
-                or_text = chat_via_openrouter(
-                    message=message,
-                    history=history,
-                    system_instruction=system_instruction,
-                    api_key=api_key,
-                )
-                if or_text:
-                    reply_text = or_text.strip()
-                    memory_cache.set(cache_key, reply_text, ttl=300)
-                    return reply_text
-                logger.warning("[chat_assistant] OpenRouter call failed, falling back to Gemini.")
-        except Exception as e:
-            logger.warning(f"[chat_assistant] OpenRouter routing failed: {e}, falling back to Gemini.")
-
-        text = self._call_gemini(
-            contents=gemini_contents,
+        # 2b. Round-robin routing across TASK_CHATBOT providers (Gemini default unchanged).
+        text = _route_or_gemini(
+            task_id="TASK_CHATBOT",
+            message=message,
+            history=history,
             system_instruction=system_instruction,
             json_mode=False,
             temperature=0.6,
-            api_key=api_key,
+            gemini_fn=lambda: self._call_gemini(
+                contents=gemini_contents,
+                system_instruction=system_instruction,
+                json_mode=False,
+                temperature=0.6,
+                api_key=api_key,
+            ),
         )
 
         if text:
@@ -520,12 +576,20 @@ class GeminiAdapter(AIServiceInterface):
         # 2. Build Native Multi-Turn Conversation Memory for Tutor
         gemini_contents = self._format_conversation_contents(history, message)
 
-        text = self._call_gemini(
-            contents=gemini_contents,
+        text = _route_or_gemini(
+            task_id="TASK_TUTOR_CHAT",
+            message=message,
+            history=history,
             system_instruction=full_system_instruction,
             json_mode=False,
             temperature=0.6,
-            api_key=api_key,
+            gemini_fn=lambda: self._call_gemini(
+                contents=gemini_contents,
+                system_instruction=full_system_instruction,
+                json_mode=False,
+                temperature=0.6,
+                api_key=api_key,
+            ),
         )
 
         if text:
