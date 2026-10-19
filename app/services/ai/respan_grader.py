@@ -58,6 +58,7 @@ class RespanDecisionGrader:
         state: str,
         questions: Dict[str, Any],
         custom_key: Optional[str] = None,
+        timeout_seconds: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Calls OpenRouter alpha decisions API.
 
@@ -90,7 +91,7 @@ class RespanDecisionGrader:
             "X-Title": "EXAMIND CBT Education Platform",
         }
 
-        with httpx.Client(timeout=self.timeout) as client:
+        with httpx.Client(timeout=timeout_seconds or self.timeout) as client:
             resp = client.post(OPENROUTER_DECISION_ENDPOINT, headers=headers, json=payload)
             if resp.status_code != 200:
                 logger.error(
@@ -289,6 +290,8 @@ class RespanDecisionGrader:
 
         final_ratio = max(0.0, min(1.0, final_ratio))
         total_score = round(final_ratio * 100.0, 1)
+        # Scale to allocated points so teachers get the actual score, not just a percentage.
+        points_earned = round(final_ratio * allocated_points, 2)
 
         # 3. Confidence level calculation
         # If decisions are clear (>0.8 or <0.2), confidence is high. If hovering near 0.5, medium/low.
@@ -302,23 +305,23 @@ class RespanDecisionGrader:
             confidence_level = "low"
             confidence_score = 0.50
 
-        # 4. Assemble human-readable rationale
+        # 4. Assemble human-readable rationale (plain text, no emoji — craft floor)
         rationale_lines = [
             f"Evaluasi Respan Span-01 Lite ({len(ref_points)} Kriteria Teruji):",
         ]
         for ev in evaluations:
-            icon = "✅" if ev["status"] == "passed" else ("🟡" if ev["status"] == "partial" else "❌")
+            status_label = {"passed": "TERPENUHI", "partial": "SEBAGIAN", "missed": "BELUM"}[ev["status"]]
             rationale_lines.append(
-                f"{icon} {ev['statement']} (Probabilitas: {int(ev['noul'] * 100)}%)"
+                f"[{status_label}] {ev['statement']} (Probabilitas: {int(ev['noul'] * 100)}%)"
             )
 
         if has_fatal_misconception:
             rationale_lines.append(
-                f"⚠️ Miskonsepsi Fatal Terdeteksi ({int(misconception_val * 100)}%) — skor disesuaikan."
+                f"[PERINGATAN] Miskonsepsi Fatal Terdeteksi ({int(misconception_val * 100)}%) — skor disesuaikan."
             )
         else:
             rationale_lines.append(
-                f"🛡️ Bebas Miskonsepsi (Integritas Konsep: {int((1.0 - misconception_val) * 100)}%)"
+                f"[OK] Bebas Miskonsepsi (Integritas Konsep: {int((1.0 - misconception_val) * 100)}%)"
             )
 
         rationale_lines.append(
@@ -331,6 +334,8 @@ class RespanDecisionGrader:
             "model": model_name,
             "provider": "Respan",
             "total_score": total_score,
+            "points_earned": points_earned,
+            "allocated_points": allocated_points,
             "confidence_level": confidence_level,
             "confidence_score": confidence_score,
             "evaluations": evaluations,
@@ -341,6 +346,8 @@ class RespanDecisionGrader:
 
         return {
             "total_score": total_score,
+            "points_earned": points_earned,
+            "allocated_points": allocated_points,
             "confidence_level": confidence_level,
             "confidence_score": confidence_score,
             "rationale": rationale_str,
@@ -378,8 +385,11 @@ class RespanDecisionGrader:
             })
 
         score_pct = round((matched / max(len(ref_points), 1)) * 100.0, 1)
+        points_earned = round((matched / max(len(ref_points), 1)) * allocated_points, 2)
         return {
             "total_score": score_pct,
+            "points_earned": points_earned,
+            "allocated_points": allocated_points,
             "confidence_level": "medium",
             "confidence_score": 0.70,
             "rationale": f"Penilaian Heuristik Cadangan: {matched}/{len(ref_points)} konsep terdeteksi.",
@@ -387,6 +397,8 @@ class RespanDecisionGrader:
                 "model": "heuristic-fallback",
                 "provider": "Local",
                 "total_score": score_pct,
+                "points_earned": points_earned,
+                "allocated_points": allocated_points,
                 "confidence_level": "medium",
                 "confidence_score": 0.70,
                 "evaluations": evaluations,

@@ -114,19 +114,11 @@ def check_span_guardrail(message: str) -> Tuple[bool, Optional[str]]:
 
         state = "EXAMIND AI safety screening for a user chat message"
 
-        # Construct grader call with ~8s timeout without mutating singleton's default
-        if hasattr(grader.call_decisions_api, "assert_called") or type(grader) is not RespanDecisionGrader:
-            guardrail_grader = grader
-        else:
-            guardrail_grader = RespanDecisionGrader(
-                api_key=grader.api_key,
-                model=grader.model,
-                timeout_seconds=8.0,
-            )
-
-        api_res = guardrail_grader.call_decisions_api(
+        # Use the task-configured grader directly with a short timeout for the guardrail path.
+        api_res = grader.call_decisions_api(
             state=state,
             questions=questions,
+            timeout_seconds=8.0,
         )
 
         answers = api_res.get("answers", {}) if isinstance(api_res, dict) else {}
