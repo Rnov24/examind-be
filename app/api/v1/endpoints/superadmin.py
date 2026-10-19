@@ -967,6 +967,16 @@ def toggle_promo_status(
 
 DEFAULT_AI_TASKS = [
     {
+        "task_id": "TASK_CHATBOT",
+        "name": "AI Assistant Chatbot",
+        "description": "Chatbot asisten utama di dashboard — menjawab pertanyaan operasional, data, dan bantuan umum.",
+        "default_provider": "gemini",
+        "default_model": "gemini-2.5-flash",
+        "default_temperature": 0.5,
+        "default_max_tokens": 2048,
+        "providers_supported": ["gemini", "openai", "claude", "deepseek", "ollama"],
+    },
+    {
         "task_id": "TASK_QUESTION_GEN",
         "name": "AI Question Generation Engine",
         "description": "Sintesis soal pilihan ganda & esai, perumusan taksonomi Bloom, dan rubrik penilaian.",

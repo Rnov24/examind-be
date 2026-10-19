@@ -40,12 +40,22 @@ class GeminiAdapter(AIServiceInterface):
         api_key: Optional[str] = None,
     ) -> Optional[str]:
         from app.core.secret_manager import get_secret
+        import json
         effective_key = api_key or get_secret("GEMINI_API_KEY") or self.api_key or settings.GEMINI_API_KEY or settings.AI_API_KEY
         if not effective_key:
             logger.info("[GeminiAdapter] No Gemini API key provided, using contextual fallback.")
             return None
 
+        # Task-level model override (TASK_CHATBOT in Secret Manager)
         model_name = settings.GEMINI_MODEL or "gemini-2.5-flash"
+        try:
+            task_raw = get_secret("TASK_CHATBOT")
+            if task_raw:
+                task_cfg = json.loads(task_raw)
+                if isinstance(task_cfg, dict) and task_cfg.get("model"):
+                    model_name = task_cfg["model"]
+        except Exception:
+            pass
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={effective_key}"
         headers = {"Content-Type": "application/json"}
 
