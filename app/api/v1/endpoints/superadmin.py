@@ -974,7 +974,7 @@ DEFAULT_AI_TASKS = [
         "default_model": "gemini-2.5-flash",
         "default_temperature": 0.5,
         "default_max_tokens": 2048,
-        "providers_supported": ["gemini", "openai", "claude", "deepseek", "ollama"],
+        "providers_supported": ["gemini", "openai", "claude", "deepseek", "ollama", "openrouter"],
     },
     {
         "task_id": "TASK_QUESTION_GEN",

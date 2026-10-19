@@ -398,6 +398,24 @@ class GeminiAdapter(AIServiceInterface):
         # 2. Build Native Multi-Turn Conversation Memory for Gemini
         gemini_contents = self._format_conversation_contents(history, message)
 
+        # 2b. OpenRouter routing: if TASK_CHATBOT selects openrouter, use it instead of Gemini.
+        try:
+            from app.services.ai.openrouter_chat import should_use_openrouter_for_chatbot, chat_via_openrouter
+            if should_use_openrouter_for_chatbot():
+                or_text = chat_via_openrouter(
+                    message=message,
+                    history=history,
+                    system_instruction=system_instruction,
+                    api_key=api_key,
+                )
+                if or_text:
+                    reply_text = or_text.strip()
+                    memory_cache.set(cache_key, reply_text, ttl=300)
+                    return reply_text
+                logger.warning("[chat_assistant] OpenRouter call failed, falling back to Gemini.")
+        except Exception as e:
+            logger.warning(f"[chat_assistant] OpenRouter routing failed: {e}, falling back to Gemini.")
+
         text = self._call_gemini(
             contents=gemini_contents,
             system_instruction=system_instruction,
