@@ -102,7 +102,12 @@ def chat_with_assistant(
 
     try:
         ai_service = get_ai_service()
-        scoped_context = build_scoped_user_context(user=current_user, db=db, query=request.message)
+        # Scoped DB context is best-effort: a retrieval failure must not kill the chat.
+        try:
+            scoped_context = build_scoped_user_context(user=current_user, db=db, query=request.message)
+        except Exception as ctx_err:
+            logger.warning(f"[chat_with_assistant] scoped context failed, continuing without it: {ctx_err}")
+            scoped_context = None
 
         if hasattr(ai_service, "chat_assistant"):
             reply = ai_service.chat_assistant(
@@ -118,8 +123,8 @@ def chat_with_assistant(
     except Exception as e:
         logger.error(f"[chat_with_assistant] Exception occurred: {e}", exc_info=True)
         reply = (
-            f"Halo {current_user.full_name or 'Pengguna'}! Saya asisten pintar EXAMIND. "
-            f"Sistem sedang menyinkronkan data Anda. Silakan tanyakan seputar materi ujian atau panduan belajar."
+            "Maaf, asisten AI sedang mengalami gangguan teknis. "
+            "Tim kami sudah mencatat masalahnya — silakan coba lagi beberapa saat lagi."
         )
 
     return ApiResponse.ok(
