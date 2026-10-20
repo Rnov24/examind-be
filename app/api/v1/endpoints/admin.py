@@ -57,21 +57,52 @@ def get_admin_stats(
         db.execute(text("SELECT 1"))
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
-        user_counts = dict(
-            db.query(User.role, func.count(User.id)).group_by(User.role).all()
-        )
+        # SCOPE FIX: all counts are scoped to the current admin's tenant.
+        # Models without tenant_id (Class, QuestionBank, Exam, ExamSession) are
+        # scoped through their owner users via subqueries (same pattern as retrieval.py).
+        tenant_id = current_user.tenant_id
+        teacher_ids_subq = None
+        student_ids_subq = None
+        class_filter = None
+        bank_filter = None
+        exam_filter = None
+        session_filter = None
+        if tenant_id:
+            teacher_ids_subq = db.query(User.id).filter(User.tenant_id == tenant_id, User.role == "teacher")
+            student_ids_subq = db.query(User.id).filter(User.tenant_id == tenant_id, User.role == "student")
+            class_filter = Class.created_by.in_(teacher_ids_subq)
+            bank_filter = QuestionBank.teacher_id.in_(teacher_ids_subq)
+            exam_filter = Exam.teacher_id.in_(teacher_ids_subq)
+            session_filter = ExamSession.student_id.in_(student_ids_subq)
+
+        user_query = db.query(User.role, func.count(User.id))
+        if tenant_id:
+            user_query = user_query.filter(User.tenant_id == tenant_id)
+        user_counts = dict(user_query.group_by(User.role).all())
         total_users = sum(user_counts.values())
         total_admins = user_counts.get("admin", 0)
         total_teachers = user_counts.get("teacher", 0)
         total_students = user_counts.get("student", 0)
 
-        total_classes = db.query(Class).count()
-        total_banks = db.query(QuestionBank).count()
-        total_exams = db.query(Exam).count()
+        class_query = db.query(Class)
+        if class_filter is not None:
+            class_query = class_query.filter(class_filter)
+        total_classes = class_query.count()
 
-        session_counts = dict(
-            db.query(ExamSession.status, func.count(ExamSession.id)).group_by(ExamSession.status).all()
-        )
+        bank_query = db.query(QuestionBank)
+        if bank_filter is not None:
+            bank_query = bank_query.filter(bank_filter)
+        total_banks = bank_query.count()
+
+        exam_query = db.query(Exam)
+        if exam_filter is not None:
+            exam_query = exam_query.filter(exam_filter)
+        total_exams = exam_query.count()
+
+        session_query = db.query(ExamSession.status, func.count(ExamSession.id))
+        if session_filter is not None:
+            session_query = session_query.filter(session_filter)
+        session_counts = dict(session_query.group_by(ExamSession.status).all())
         total_sessions = sum(session_counts.values())
         active_sessions = session_counts.get("in_progress", 0) + session_counts.get("ready", 0)
         completed_sessions = session_counts.get("submitted", 0) + session_counts.get("graded", 0)

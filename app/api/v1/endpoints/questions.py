@@ -1,7 +1,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import get_current_active_user, require_teacher
@@ -112,7 +112,12 @@ def get_question_bank_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
-    bank = db.query(QuestionBank).filter(QuestionBank.id == bank_id).first()
+    bank = (
+        db.query(QuestionBank)
+        .options(selectinload(QuestionBank.questions))
+        .filter(QuestionBank.id == bank_id)
+        .first()
+    )
     if not bank:
         raise AppException(
             message="Bank soal tidak ditemukan.",

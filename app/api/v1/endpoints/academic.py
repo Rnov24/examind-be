@@ -125,7 +125,15 @@ def get_class_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    cls = db.query(Class).filter(Class.id == class_id).first()
+    cls = (
+        db.query(Class)
+        .options(
+            selectinload(Class.members).selectinload(ClassMember.user),
+            joinedload(Class.creator),
+        )
+        .filter(Class.id == class_id)
+        .first()
+    )
     if not cls:
         raise AppException(
             message="Kelas tidak ditemukan.",

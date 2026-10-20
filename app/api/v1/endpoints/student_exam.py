@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Request, BackgroundTasks, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import get_current_active_user, require_student
@@ -47,7 +47,13 @@ def get_student_active_exams(
 
     exams = (
         db.query(Exam)
+        .options(
+            joinedload(Exam.teacher),
+            joinedload(Exam.class_),
+            selectinload(Exam.exam_questions),
+        )
         .filter(Exam.class_id.in_(class_ids), Exam.status.in_(["published", "in_progress", "completed"]))
+        .limit(100)
         .all()
     )
 
@@ -381,9 +387,22 @@ def get_exam_result(
             error_code="RESULT_NOT_FOUND",
         )
 
-    exam = session.exam
+    exam = (
+        db.query(Exam)
+        .options(selectinload(Exam.exam_questions).selectinload(ExamQuestion.question))
+        .filter(Exam.id == session.exam_id)
+        .first()
+    )
     answers_detail = []
     max_score = 0.0
+
+    # One query for all answers in this session (no per-question N+1).
+    answers_by_question = {
+        a.question_id: a
+        for a in db.query(StudentAnswer)
+        .filter(StudentAnswer.session_id == session.id)
+        .all()
+    }
 
     for eq in exam.exam_questions:
         q = eq.question
@@ -392,11 +411,7 @@ def get_exam_result(
         pts = float(eq.allocated_points)
         max_score += pts
 
-        ans = (
-            db.query(StudentAnswer)
-            .filter(StudentAnswer.session_id == session.id, StudentAnswer.question_id == q.id)
-            .first()
-        )
+        ans = answers_by_question.get(q.id)
 
         show_explanation = (
             exam.explanation_policy == "instant"

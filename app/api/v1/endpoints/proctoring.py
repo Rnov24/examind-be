@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
-from fastapi import APIRouter, Depends, status
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import get_current_active_user, require_teacher
@@ -104,6 +104,8 @@ async def log_proctoring_event(
 @router.get("/exam/{exam_id}/logs", response_model=ApiResponse[List[ProctoringLogResponse]])
 def get_exam_proctoring_logs(
     exam_id: int,
+    page: int = Query(1, ge=1, description="Nomor halaman"),
+    page_size: int = Query(50, ge=1, le=200, description="Jumlah data per halaman"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
@@ -114,8 +116,11 @@ def get_exam_proctoring_logs(
 
     logs = (
         db.query(ProctoringLog)
+        .options(joinedload(ProctoringLog.session).joinedload(ExamSession.student))
         .filter(ProctoringLog.session_id.in_(session_ids))
         .order_by(ProctoringLog.event_timestamp.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
         .all()
     )
 

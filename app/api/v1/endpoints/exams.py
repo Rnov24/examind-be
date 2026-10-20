@@ -164,7 +164,12 @@ def get_exam_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    exam = db.query(Exam).filter(Exam.id == exam_id).first()
+    exam = (
+        db.query(Exam)
+        .options(selectinload(Exam.exam_questions).selectinload(ExamQuestion.question))
+        .filter(Exam.id == exam_id)
+        .first()
+    )
     if not exam:
         raise AppException(
             message="Paket ujian tidak ditemukan.",

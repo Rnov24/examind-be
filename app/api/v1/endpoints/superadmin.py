@@ -5,7 +5,7 @@ import httpx
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import func, case
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, load_only
 from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import require_superadmin, require_admin
@@ -759,7 +759,22 @@ def get_superadmin_finance_analytics(
             return ApiResponse.ok(data=cached, message="Data finansial SaaS dan MRR berhasil dimuat")
 
     with log_query_timing("get_superadmin_finance_analytics"):
-        tenants = db.query(Tenant).all()
+        # Column-limited: only the fields this endpoint reads (name/code feed recent_invoices).
+        tenants = (
+            db.query(Tenant)
+            .options(
+                load_only(
+                    Tenant.id,
+                    Tenant.name,
+                    Tenant.code,
+                    Tenant.created_at,
+                    Tenant.is_active,
+                    Tenant.subscription_status,
+                    Tenant.subscription_plan,
+                )
+            )
+            .all()
+        )
 
     # Plan rates (in IDR)
     PLAN_PRICES = {

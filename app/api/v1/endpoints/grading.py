@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import require_teacher
@@ -127,9 +127,28 @@ def get_session_grading_detail(
             error_code="SESSION_NOT_FOUND",
         )
 
-    exam = session.exam
+    exam = (
+        db.query(Exam)
+        .options(selectinload(Exam.exam_questions).selectinload(ExamQuestion.question))
+        .filter(Exam.id == session.exam_id)
+        .first()
+    )
+    if not exam:
+        raise AppException(
+            message="Paket ujian tidak ditemukan.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            error_code="EXAM_NOT_FOUND",
+        )
     answers_detail = []
     max_score = 0.0
+
+    # One query for all answers in this session (no per-question N+1).
+    answers_by_question = {
+        a.question_id: a
+        for a in db.query(StudentAnswer)
+        .filter(StudentAnswer.session_id == session.id)
+        .all()
+    }
 
     for eq in exam.exam_questions:
         q = eq.question
@@ -138,11 +157,7 @@ def get_session_grading_detail(
         pts = float(eq.allocated_points)
         max_score += pts
 
-        ans = (
-            db.query(StudentAnswer)
-            .filter(StudentAnswer.session_id == session.id, StudentAnswer.question_id == q.id)
-            .first()
-        )
+        ans = answers_by_question.get(q.id)
 
         answers_detail.append(
             StudentAnswerDetail(

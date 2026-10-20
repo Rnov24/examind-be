@@ -58,8 +58,24 @@ def compute_exam_analytics(db: Session, exam_id: int) -> Dict[str, Any]:
 
     # Item Analysis (Upper 27% and Lower 27% groups)
     group_size = max(1, int(round(total_examinees * 0.27)))
-    upper_sessions = [s.id for s in sessions[:group_size]]
-    lower_sessions = [s.id for s in sessions[-group_size:]]
+    upper_sessions = {s.id for s in sessions[:group_size]}
+    lower_sessions = {s.id for s in sessions[-group_size:]}
+    session_ids = [s.id for s in sessions]
+
+    # One query for ALL answers of this exam (needed columns only), grouped by question in Python.
+    all_answers = (
+        db.query(
+            StudentAnswer.question_id,
+            StudentAnswer.session_id,
+            StudentAnswer.is_correct,
+            StudentAnswer.final_score,
+        )
+        .filter(StudentAnswer.session_id.in_(session_ids))
+        .all()
+    )
+    answers_by_question: Dict[int, List[Any]] = {}
+    for a in all_answers:
+        answers_by_question.setdefault(a.question_id, []).append(a)
 
     item_analysis_results = []
     for eq in exam.exam_questions:
@@ -70,21 +86,13 @@ def compute_exam_analytics(db: Session, exam_id: int) -> Dict[str, Any]:
         q_id = q.id
         allocated = float(eq.allocated_points)
 
-        # Get all answers for this question
-        all_answers = (
-            db.query(StudentAnswer)
-            .filter(
-                StudentAnswer.question_id == q_id,
-                StudentAnswer.session_id.in_([s.id for s in sessions]),
-            )
-            .all()
-        )
+        q_answers = answers_by_question.get(q_id, [])
 
         correct_count = 0
         upper_correct = 0
         lower_correct = 0
 
-        for a in all_answers:
+        for a in q_answers:
             # Full credit or PG is_correct
             is_full = bool(a.is_correct) or (float(a.final_score or 0.0) >= allocated * 0.7)
             if is_full:

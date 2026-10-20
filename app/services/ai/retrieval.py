@@ -1,8 +1,8 @@
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
-from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func, case
 
 from app.models.user import User
 from app.models.tenant import Tenant, TenantRegistrationCode
@@ -71,25 +71,45 @@ def build_scoped_user_context(user: User, db: Session, query: Optional[str] = No
         lines.append("")
 
         # 2. Exam Sessions & Grades History (SCOPED TO THIS STUDENT ONLY)
+        # Aggregates via SQL (no full-row load); display list capped at 15 with eager loading.
+        completed_cond = ExamSession.status.in_(["graded", "submitted"])
+        agg = (
+            db.query(
+                func.count(ExamSession.id),
+                func.coalesce(func.sum(case((completed_cond, 1), else_=0)), 0),
+                func.avg(case((completed_cond, func.coalesce(ExamSession.total_score, 0.0)))),
+                func.max(case((completed_cond, func.coalesce(ExamSession.total_score, 0.0)))),
+            )
+            .filter(ExamSession.student_id == user.id)
+            .one()
+        )
+        total_sessions_count = agg[0] or 0
+        completed_count = int(agg[1] or 0)
+        avg_score = round(float(agg[2]), 1) if completed_count and agg[2] is not None else 0.0
+        highest_score = float(agg[3]) if completed_count and agg[3] is not None else 0.0
+
         sessions = (
             db.query(ExamSession)
+            .options(joinedload(ExamSession.exam).joinedload(Exam.class_))
             .filter(ExamSession.student_id == user.id)
             .order_by(ExamSession.submit_time.desc(), ExamSession.start_time.desc())
+            .limit(15)
             .all()
         )
 
-        completed_sessions = [s for s in sessions if s.status in ["graded", "submitted"]]
-        scores = [float(s.total_score or 0.0) for s in completed_sessions]
-        avg_score = round(sum(scores) / len(scores), 1) if scores else 0.0
-        highest_score = max(scores) if scores else 0.0
-
         lines.append(f"=== REKAP AKADEMIK SISWA ===")
-        lines.append(f"- Total Ujian Dikerjakan: {len(sessions)}")
-        lines.append(f"- Total Ujian Selesai/Dinilai: {len(completed_sessions)}")
-        if completed_sessions:
+        lines.append(f"- Total Ujian Dikerjakan: {total_sessions_count}")
+        lines.append(f"- Total Ujian Selesai/Dinilai: {completed_count}")
+        if completed_count:
             lines.append(f"- Rata-rata Nilai: {avg_score}")
             lines.append(f"- Nilai Tertinggi: {highest_score}")
-            latest_s = completed_sessions[0]
+            latest_s = (
+                db.query(ExamSession)
+                .options(joinedload(ExamSession.exam))
+                .filter(ExamSession.student_id == user.id, completed_cond)
+                .order_by(ExamSession.submit_time.desc(), ExamSession.start_time.desc())
+                .first()
+            )
             lines.append(f"- Nilai Ujian Terakhir: {latest_s.total_score} pada ujian '{latest_s.exam.title if latest_s.exam else 'Ujian'}'")
         lines.append("")
 
@@ -97,7 +117,7 @@ def build_scoped_user_context(user: User, db: Session, query: Optional[str] = No
         if not sessions:
             lines.append("- Belum pernah mengikuti ujian.")
         else:
-            for s in sessions[:15]:  # Up to 15 latest
+            for s in sessions:  # Up to 15 latest (already limited by query)
                 exam_title = s.exam.title if s.exam else f"Ujian #{s.exam_id}"
                 subject_name = s.exam.class_.name if (s.exam and s.exam.class_) else "Umum"
                 submit_str = s.submit_time.strftime("%d %b %Y %H:%M") if s.submit_time else "Belum submit"
@@ -146,34 +166,67 @@ def build_scoped_user_context(user: User, db: Session, query: Optional[str] = No
     elif user.role == "teacher":
         # Classes created
         classes = db.query(Class).filter(Class.created_by == user.id).all()
+        class_ids = [c.id for c in classes]
+        student_counts = (
+            dict(
+                db.query(ClassMember.class_id, func.count(ClassMember.id))
+                .filter(ClassMember.class_id.in_(class_ids), ClassMember.role == "student")
+                .group_by(ClassMember.class_id)
+                .all()
+            )
+            if class_ids
+            else {}
+        )
         lines.append(f"=== KELAS YANG DIAJAR ===")
         if not classes:
             lines.append("- Belum ada kelas yang dibuat.")
         else:
             for c in classes:
-                student_count = db.query(ClassMember).filter(ClassMember.class_id == c.id, ClassMember.role == "student").count()
+                student_count = student_counts.get(c.id, 0)
                 lines.append(f"- {c.name} ({c.grade_level}) - {student_count} siswa")
         lines.append("")
 
         # Exams created
         exams = db.query(Exam).filter(Exam.teacher_id == user.id).order_by(Exam.created_at.desc()).limit(10).all()
+        exam_ids = [e.id for e in exams]
+        session_counts = (
+            dict(
+                db.query(ExamSession.exam_id, func.count(ExamSession.id))
+                .filter(ExamSession.exam_id.in_(exam_ids))
+                .group_by(ExamSession.exam_id)
+                .all()
+            )
+            if exam_ids
+            else {}
+        )
         lines.append(f"=== UJIAN YANG DIBUAT (10 TERAKHIR) ===")
         if not exams:
             lines.append("- Belum ada ujian yang dibuat.")
         else:
             for e in exams:
-                sess_count = db.query(ExamSession).filter(ExamSession.exam_id == e.id).count()
+                sess_count = session_counts.get(e.id, 0)
                 lines.append(f"- '{e.title}' ({e.status.upper()}) | Peserta mengerjakan: {sess_count}")
         lines.append("")
 
         # Question Banks
         banks = db.query(QuestionBank).filter(QuestionBank.teacher_id == user.id).all()
+        bank_ids = [b.id for b in banks]
+        question_counts = (
+            dict(
+                db.query(Question.bank_id, func.count(Question.id))
+                .filter(Question.bank_id.in_(bank_ids))
+                .group_by(Question.bank_id)
+                .all()
+            )
+            if bank_ids
+            else {}
+        )
         lines.append(f"=== BANK SOAL ===")
         if not banks:
             lines.append("- Belum ada bank soal.")
         else:
             for b in banks:
-                q_count = db.query(Question).filter(Question.bank_id == b.id).count()
+                q_count = question_counts.get(b.id, 0)
                 lines.append(f"- '{b.title}' ({b.subject}) - {q_count} butir soal")
         lines.append("")
 
@@ -334,16 +387,23 @@ def build_scoped_user_context(user: User, db: Session, query: Optional[str] = No
                 lines.append(f"- {s_key} ({s_service}) — {status_label}")
         lines.append("")
 
-        # 7. Proctoring Aggregates (last 7 days)
+        # 7. Proctoring Aggregates (last 7 days) — bucket counts via SQL aggregation
         seven_days_ago = now - timedelta(days=7)
-        recent_sessions = (
-            db.query(ExamSession.integrity_score)
+        eff_score = func.coalesce(ExamSession.integrity_score, 100)
+        integ_agg = (
+            db.query(
+                func.count(ExamSession.id),
+                func.coalesce(func.sum(case((eff_score >= 90, 1), else_=0)), 0),
+                func.coalesce(func.sum(case(((eff_score >= 70) & (eff_score < 90), 1), else_=0)), 0),
+                func.coalesce(func.sum(case((eff_score < 70, 1), else_=0)), 0),
+            )
             .filter(ExamSession.start_time >= seven_days_ago)
-            .all()
+            .one()
         )
-        high_integrity = sum(1 for (score,) in recent_sessions if (score or 100) >= 90)
-        med_integrity = sum(1 for (score,) in recent_sessions if 70 <= (score or 100) < 90)
-        low_integrity = sum(1 for (score,) in recent_sessions if (score or 100) < 70)
+        total_recent_sessions = integ_agg[0] or 0
+        high_integrity = int(integ_agg[1] or 0)
+        med_integrity = int(integ_agg[2] or 0)
+        low_integrity = int(integ_agg[3] or 0)
 
         violation_counts = (
             db.query(ProctoringLog.event_type, func.count(ProctoringLog.id))
@@ -353,7 +413,7 @@ def build_scoped_user_context(user: User, db: Session, query: Optional[str] = No
         )
 
         lines.append("=== AGREGAT PENGAWASAN & INTEGRITAS (7 HARI TERAKHIR) ===")
-        lines.append(f"- Total Sesi Ujian (7 Hari Terakhir): {len(recent_sessions)}")
+        lines.append(f"- Total Sesi Ujian (7 Hari Terakhir): {total_recent_sessions}")
         lines.append("- Distribusi Skor Integritas Sesi:")
         lines.append(f"  * Integritas Tinggi (90-100%): {high_integrity} sesi")
         lines.append(f"  * Integritas Sedang (70-89%): {med_integrity} sesi")
@@ -441,13 +501,13 @@ def build_scoped_user_context(user: User, db: Session, query: Optional[str] = No
             lines.append(f"- Total Admin Sekolah: {role_counts.get('admin', 0)}")
             lines.append("")
 
-            # Academic & Exam stats for this tenant
-            teacher_ids = [uid for (uid,) in db.query(User.id).filter(User.tenant_id == tenant.id, User.role == "teacher").all()]
-            total_classes = db.query(func.count(Class.id)).filter(Class.created_by.in_(teacher_ids)).scalar() or 0 if teacher_ids else 0
-            total_exams = db.query(func.count(Exam.id)).filter(Exam.teacher_id.in_(teacher_ids)).scalar() or 0 if teacher_ids else 0
+            # Academic & Exam stats for this tenant (ID lists as subqueries, not materialized)
+            teacher_ids_subq = db.query(User.id).filter(User.tenant_id == tenant.id, User.role == "teacher")
+            total_classes = db.query(func.count(Class.id)).filter(Class.created_by.in_(teacher_ids_subq)).scalar() or 0
+            total_exams = db.query(func.count(Exam.id)).filter(Exam.teacher_id.in_(teacher_ids_subq)).scalar() or 0
 
-            student_ids = [uid for (uid,) in db.query(User.id).filter(User.tenant_id == tenant.id, User.role == "student").all()]
-            total_sessions = db.query(func.count(ExamSession.id)).filter(ExamSession.student_id.in_(student_ids)).scalar() or 0 if student_ids else 0
+            student_ids_subq = db.query(User.id).filter(User.tenant_id == tenant.id, User.role == "student")
+            total_sessions = db.query(func.count(ExamSession.id)).filter(ExamSession.student_id.in_(student_ids_subq)).scalar() or 0
 
             lines.append("=== REKAP AKADEMIK & UJIAN SEKOLAH ===")
             lines.append(f"- Total Kelas Aktif: {total_classes}")
@@ -479,33 +539,39 @@ def build_scoped_user_context(user: User, db: Session, query: Optional[str] = No
             lines.append("")
 
             # Proctoring aggregates (last 7 days, scoped to this tenant's students)
+            # Bucket counts via SQL aggregation; session sets passed as subqueries.
             now = datetime.utcnow()
             seven_days_ago = now - timedelta(days=7)
-            if student_ids:
-                recent_sessions = (
-                    db.query(ExamSession.id, ExamSession.integrity_score)
-                    .filter(ExamSession.student_id.in_(student_ids), ExamSession.start_time >= seven_days_ago)
-                    .all()
+            recent_filter = (
+                ExamSession.student_id.in_(student_ids_subq),
+                ExamSession.start_time >= seven_days_ago,
+            )
+            eff_score = func.coalesce(ExamSession.integrity_score, 100)
+            integ_agg = (
+                db.query(
+                    func.count(ExamSession.id),
+                    func.coalesce(func.sum(case((eff_score >= 90, 1), else_=0)), 0),
+                    func.coalesce(func.sum(case(((eff_score >= 70) & (eff_score < 90), 1), else_=0)), 0),
+                    func.coalesce(func.sum(case((eff_score < 70, 1), else_=0)), 0),
                 )
-                session_ids = [s_id for s_id, _ in recent_sessions]
-                high_integrity = sum(1 for _, score in recent_sessions if (score or 100) >= 90)
-                med_integrity = sum(1 for _, score in recent_sessions if 70 <= (score or 100) < 90)
-                low_integrity = sum(1 for _, score in recent_sessions if (score or 100) < 70)
+                .filter(*recent_filter)
+                .one()
+            )
+            total_recent_sessions = integ_agg[0] or 0
+            high_integrity = int(integ_agg[1] or 0)
+            med_integrity = int(integ_agg[2] or 0)
+            low_integrity = int(integ_agg[3] or 0)
 
-                violation_counts = (
-                    db.query(ProctoringLog.event_type, func.count(ProctoringLog.id))
-                    .filter(ProctoringLog.session_id.in_(session_ids), ProctoringLog.event_timestamp >= seven_days_ago)
-                    .group_by(ProctoringLog.event_type)
-                    .all()
-                    if session_ids else []
-                )
-            else:
-                recent_sessions = []
-                high_integrity = med_integrity = low_integrity = 0
-                violation_counts = []
+            recent_session_ids_subq = db.query(ExamSession.id).filter(*recent_filter)
+            violation_counts = (
+                db.query(ProctoringLog.event_type, func.count(ProctoringLog.id))
+                .filter(ProctoringLog.session_id.in_(recent_session_ids_subq), ProctoringLog.event_timestamp >= seven_days_ago)
+                .group_by(ProctoringLog.event_type)
+                .all()
+            )
 
             lines.append("=== AGREGAT PENGAWASAN & INTEGRITAS SEKOLAH (7 HARI TERAKHIR) ===")
-            lines.append(f"- Total Sesi Ujian (7 Hari Terakhir): {len(recent_sessions)}")
+            lines.append(f"- Total Sesi Ujian (7 Hari Terakhir): {total_recent_sessions}")
             lines.append("- Distribusi Skor Integritas Sesi:")
             lines.append(f"  * Integritas Tinggi (90-100%): {high_integrity} sesi")
             lines.append(f"  * Integritas Sedang (70-89%): {med_integrity} sesi")
