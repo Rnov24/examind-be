@@ -28,12 +28,15 @@ def _route_or_gemini(
     json_mode: bool,
     temperature: float,
     gemini_fn,
+    user=None,
+    db=None,
 ) -> Optional[str]:
     """Round-robin across providers when the task's provider is not gemini.
 
     provider == gemini (or task unconfigured) -> existing Gemini path unchanged.
     Otherwise route via provider_router round-robin; on total failure fall back
-    to the existing Gemini path.
+    to the existing Gemini path. `user`/`db` are forwarded so providers with
+    tool support (OpenRouter) can run scoped chatbot tools.
     """
     from app.services.ai.provider_router import get_task_config, route_chat
     try:
@@ -50,6 +53,8 @@ def _route_or_gemini(
         temperature=temperature,
         json_mode=json_mode,
         gemini_fn=gemini_fn,
+        user=user,
+        db=db,
     )
     if routed:
         return routed
@@ -67,7 +72,7 @@ class GeminiAdapter(AIServiceInterface):
         self.api_key = settings.GEMINI_API_KEY or settings.AI_API_KEY
         self.model = settings.GEMINI_MODEL or "gemini-2.5-flash"
 
-    def _call_gemini(
+    def _call_gemini_raw(
         self,
         prompt: Optional[str] = None,
         contents: Optional[List[Dict[str, Any]]] = None,
@@ -75,9 +80,15 @@ class GeminiAdapter(AIServiceInterface):
         json_mode: bool = False,
         temperature: float = 0.2,
         api_key: Optional[str] = None,
-    ) -> Optional[str]:
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Calls the Gemini REST API and returns the raw parsed JSON response.
+
+        `tools` is an optional list of function declarations (Gemini format);
+        when provided it is passed through as the request's `tools` field.
+        Returns None on any failure (no key, non-200, exception).
+        """
         from app.core.secret_manager import get_secret
-        import json
         effective_key = api_key or get_secret("GEMINI_API_KEY") or self.api_key or settings.GEMINI_API_KEY or settings.AI_API_KEY
         if not effective_key:
             logger.info("[GeminiAdapter] No Gemini API key provided, using contextual fallback.")
@@ -106,6 +117,9 @@ class GeminiAdapter(AIServiceInterface):
                 "parts": [{"text": system_instruction}]
             }
 
+        if tools:
+            body["tools"] = [{"function_declarations": tools}]
+
         gen_config: Dict[str, Any] = {"temperature": temperature}
         if json_mode:
             gen_config["responseMimeType"] = "application/json"
@@ -114,24 +128,52 @@ class GeminiAdapter(AIServiceInterface):
         try:
             resp = requests.post(url, headers=headers, json=body, timeout=30)
             if resp.status_code == 200:
-                data = resp.json()
-                candidates = data.get("candidates", [])
-                if candidates:
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    if parts and "text" in parts[0]:
-                        raw_text = parts[0]["text"].strip()
-                        # Clean JSON code fences if present
-                        if raw_text.startswith("```json"):
-                            raw_text = raw_text[7:]
-                        elif raw_text.startswith("```"):
-                            raw_text = raw_text[3:]
-                        if raw_text.endswith("```"):
-                            raw_text = raw_text[:-3]
-                        return raw_text.strip()
-            else:
-                logger.warning(f"[GeminiAdapter] API returned status {resp.status_code}: {resp.text}")
+                return resp.json()
+            logger.warning(f"[GeminiAdapter] API returned status {resp.status_code}: {resp.text}")
         except Exception as e:
             logger.warning(f"[GeminiAdapter] Request failed: {e}")
+        return None
+
+    @staticmethod
+    def _extract_text_from_response(data: Optional[Dict[str, Any]]) -> Optional[str]:
+        """Extracts the first text part from a raw Gemini response (fence-cleaned)."""
+        if not data:
+            return None
+        candidates = data.get("candidates", [])
+        if not candidates:
+            return None
+        parts = candidates[0].get("content", {}).get("parts", [])
+        for part in parts:
+            if isinstance(part, dict) and "text" in part:
+                raw_text = part["text"].strip()
+                # Clean JSON code fences if present
+                if raw_text.startswith("```json"):
+                    raw_text = raw_text[7:]
+                elif raw_text.startswith("```"):
+                    raw_text = raw_text[3:]
+                if raw_text.endswith("```"):
+                    raw_text = raw_text[:-3]
+                return raw_text.strip()
+        return None
+
+    def _call_gemini(
+        self,
+        prompt: Optional[str] = None,
+        contents: Optional[List[Dict[str, Any]]] = None,
+        system_instruction: Optional[str] = None,
+        json_mode: bool = False,
+        temperature: float = 0.2,
+        api_key: Optional[str] = None,
+    ) -> Optional[str]:
+        data = self._call_gemini_raw(
+            prompt=prompt,
+            contents=contents,
+            system_instruction=system_instruction,
+            json_mode=json_mode,
+            temperature=temperature,
+            api_key=api_key,
+        )
+        return self._extract_text_from_response(data)
 
     def _format_conversation_contents(
         self, history: Optional[List[Dict[str, str]]], message: str
@@ -174,6 +216,73 @@ class GeminiAdapter(AIServiceInterface):
             cleaned.append({"role": "user", "parts": [{"text": message.strip()}]})
 
         return cleaned
+
+    def _gemini_chat_with_tools(
+        self,
+        contents: List[Dict[str, Any]],
+        system_instruction: Optional[str],
+        temperature: float,
+        api_key: Optional[str],
+        user,
+        db,
+    ) -> Optional[str]:
+        """Chat turn with scoped function-calling tools (max 2 tool rounds).
+
+        The model may request tool calls; each is executed server-side via
+        chatbot_tools.execute_tool (identity always from `user`, never from
+        model-supplied args). Results go back as functionResponse parts.
+        Returns the final text answer, or None if the loop fails so the
+        caller can fall back to the plain path.
+        """
+        from app.services.ai.chatbot_tools import TOOL_DEFINITIONS_GEMINI, execute_tool
+
+        convo: List[Dict[str, Any]] = list(contents)
+        # Rounds 0 and 1 may execute tools; round 2 is a tools-free final call
+        # so the model must produce a text answer. Bounds latency/cost.
+        for round_idx in range(3):
+            use_tools = TOOL_DEFINITIONS_GEMINI if round_idx < 2 else None
+            data = self._call_gemini_raw(
+                contents=convo,
+                system_instruction=system_instruction,
+                json_mode=False,
+                temperature=temperature,
+                api_key=api_key,
+                tools=use_tools,
+            )
+            if data is None:
+                return None
+            candidates = data.get("candidates", [])
+            if not candidates:
+                return None
+            model_content = candidates[0].get("content", {})
+            parts = model_content.get("parts", []) or []
+
+            function_calls = [
+                part["functionCall"]
+                for part in parts
+                if isinstance(part, dict) and isinstance(part.get("functionCall"), dict)
+            ]
+            if not function_calls:
+                return self._extract_text_from_response(data)
+
+            response_parts: List[Dict[str, Any]] = []
+            for call in function_calls:
+                tool_name = call.get("name", "")
+                tool_args = call.get("args") or {}
+                result_text = execute_tool(tool_name, user, db, tool_args)
+                logger.info(
+                    f"[GeminiAdapter] tool round {round_idx + 1}: executed {tool_name} "
+                    f"for user_id={getattr(user, 'id', '?')}"
+                )
+                response_parts.append(
+                    {"functionResponse": {"name": tool_name, "response": {"result": result_text}}}
+                )
+
+            convo = convo + [
+                {"role": "model", "parts": parts},
+                {"role": "user", "parts": response_parts},
+            ]
+        return None
 
     def generate_questions(self, request: AIGenerateRequest) -> AIGenerateData:
         system_prompt = (
@@ -409,6 +518,8 @@ class GeminiAdapter(AIServiceInterface):
         scoped_context: Optional[str] = None,
         api_key: Optional[str] = None,
         role: Optional[str] = None,
+        user=None,
+        db=None,
     ) -> str:
         user_role = (role or "").strip().lower()
         if not user_role and scoped_context:
@@ -463,7 +574,36 @@ class GeminiAdapter(AIServiceInterface):
         # 2. Build Native Multi-Turn Conversation Memory for Gemini
         gemini_contents = self._format_conversation_contents(history, message)
 
-        # 2b. Round-robin routing across TASK_CHATBOT providers (Gemini default unchanged).
+        # 2b. Scoped function-calling tools: only when the endpoint supplied the
+        # authenticated user + db session. Tool identity is enforced server-side
+        # inside execute_tool; on any tool-loop error we fall back to plain chat.
+        def _gemini_plain() -> Optional[str]:
+            return self._call_gemini(
+                contents=gemini_contents,
+                system_instruction=system_instruction,
+                json_mode=False,
+                temperature=0.6,
+                api_key=api_key,
+            )
+
+        def _gemini_turn() -> Optional[str]:
+            if user is not None and db is not None:
+                try:
+                    tool_text = self._gemini_chat_with_tools(
+                        contents=gemini_contents,
+                        system_instruction=system_instruction,
+                        temperature=0.6,
+                        api_key=api_key,
+                        user=user,
+                        db=db,
+                    )
+                    if tool_text:
+                        return tool_text
+                except Exception as tool_err:
+                    logger.warning(f"[GeminiAdapter] tool loop failed, using plain path: {tool_err}")
+            return _gemini_plain()
+
+        # 2c. Round-robin routing across TASK_CHATBOT providers (Gemini default unchanged).
         text = _route_or_gemini(
             task_id="TASK_CHATBOT",
             message=message,
@@ -471,13 +611,9 @@ class GeminiAdapter(AIServiceInterface):
             system_instruction=system_instruction,
             json_mode=False,
             temperature=0.6,
-            gemini_fn=lambda: self._call_gemini(
-                contents=gemini_contents,
-                system_instruction=system_instruction,
-                json_mode=False,
-                temperature=0.6,
-                api_key=api_key,
-            ),
+            gemini_fn=_gemini_turn,
+            user=user,
+            db=db,
         )
 
         if text:

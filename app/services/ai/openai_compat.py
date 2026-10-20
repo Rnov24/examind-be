@@ -142,6 +142,8 @@ def chat_via_provider(
     temperature: float = 0.5,
     timeout_seconds: float = 30.0,
     json_mode: bool = False,
+    user=None,
+    db=None,
 ) -> Optional[str]:
     """Dispatches to the right OpenAI-compatible chat function by provider name.
 
@@ -172,6 +174,8 @@ def chat_via_provider(
             temperature=temperature,
             timeout_seconds=timeout_seconds,
             json_mode=json_mode,
+            user=user,
+            db=db,
         )
     if provider == "ollama":
         return chat_via_ollama(

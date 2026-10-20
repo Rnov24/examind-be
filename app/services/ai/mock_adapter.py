@@ -313,6 +313,8 @@ class MockAIService(AIServiceInterface):
         scoped_context: Optional[str] = None,
         api_key: Optional[str] = None,
         role: Optional[str] = None,
+        user=None,
+        db=None,
     ) -> str:
         msg_lower = message.lower()
         

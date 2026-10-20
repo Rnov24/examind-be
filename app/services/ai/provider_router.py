@@ -129,6 +129,8 @@ def _try_provider(
     timeout_seconds: float,
     json_mode: bool,
     gemini_fn: Optional[Callable[[], Optional[str]]],
+    user=None,
+    db=None,
 ) -> Optional[str]:
     provider = (provider or "").strip().lower()
     if provider == "gemini":
@@ -161,6 +163,8 @@ def _try_provider(
             temperature=temperature,
             timeout_seconds=timeout_seconds,
             json_mode=json_mode,
+            user=user,
+            db=db,
         )
     logger.warning(f"[ProviderRouter] unknown provider '{provider}'; skipping")
     return None
@@ -175,6 +179,8 @@ def route_chat(
     timeout_seconds: float = 30.0,
     json_mode: bool = False,
     gemini_fn: Optional[Callable[[], Optional[str]]] = None,
+    user=None,
+    db=None,
 ) -> Optional[str]:
     """Round-robin chat across the task's providers. Returns text or None if all fail.
 
@@ -198,6 +204,7 @@ def route_chat(
             text = _try_provider(
                 provider, config, message, history, system_instruction,
                 temp, timeout_seconds, json_mode, gemini_fn,
+                user=user, db=db,
             )
         except Exception as e:
             logger.warning(
