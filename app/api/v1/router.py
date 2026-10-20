@@ -10,6 +10,7 @@ from app.api.v1.endpoints.grading import router as grading_router
 from app.api.v1.endpoints.analytics import router as analytics_router
 from app.api.v1.endpoints.admin import router as admin_router
 from app.api.v1.endpoints.superadmin import router as superadmin_router
+from app.api.v1.endpoints.public import router as public_router
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -24,4 +25,5 @@ api_router.include_router(grading_router)
 api_router.include_router(analytics_router)
 api_router.include_router(admin_router)
 api_router.include_router(superadmin_router)
+api_router.include_router(public_router)
 
