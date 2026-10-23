@@ -18,6 +18,7 @@ class ProctoringLog(Base):
             "fullscreen_exit",
             "suspicious_object",
             "companion_disconnected",
+            "phone_detected",
             name="proctoring_event_types",
         ),
         nullable=False,

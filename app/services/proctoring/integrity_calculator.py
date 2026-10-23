@@ -7,6 +7,7 @@ DEDUCTION_MAP = {
     "face_absent": 8,
     "multiple_faces": 15,
     "suspicious_object": 20,
+    "phone_detected": 20,
     "gaze_away": 4,
     "companion_disconnected": 10,
 }
