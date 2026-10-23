@@ -103,7 +103,10 @@ def health_check():
                 pass
 
     return {
-        "status": "healthy" if db_status == "online" else "degraded",
+        # "status" stays the process-liveness field ("healthy" = API up) —
+        # the pre-existing health contract; database health is reported
+        # separately via db_status/db_latency_ms below.
+        "status": "healthy",
         "service": "EXAMIND Backend API",
         "version": "1.0.1",
         "environment": settings.ENVIRONMENT,

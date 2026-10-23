@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -46,15 +46,14 @@ def _violations_per_exam(db, since, extra_filters):
     extra_filters: list of SQLAlchemy filter clauses scoping the sessions
     (tenant / teacher). Returns one notification item per exam.
     """
+    high_count = func.sum(case((ProctoringLog.severity == "high", 1), else_=0))
     rows = (
         db.query(
             Exam.id,
             Exam.title,
             func.count(ProctoringLog.id),
             func.max(ProctoringLog.event_timestamp),
-            func.sum(func.if_(ProctoringLog.severity == "high", 1, 0))
-            if False
-            else func.count(ProctoringLog.id),
+            high_count,
         )
         .join(ExamSession, ProctoringLog.session_id == ExamSession.id)
         .join(Exam, ExamSession.exam_id == Exam.id)
@@ -68,19 +67,7 @@ def _violations_per_exam(db, since, extra_filters):
         .all()
     )
     items = []
-    for exam_id, title, count, last_at, _ in rows:
-        # Determine whether any high-severity log exists for this exam.
-        has_high = (
-            db.query(ProctoringLog.id)
-            .join(ExamSession, ProctoringLog.session_id == ExamSession.id)
-            .filter(
-                ExamSession.exam_id == exam_id,
-                ProctoringLog.event_timestamp >= since,
-                ProctoringLog.severity == "high",
-            )
-            .first()
-            is not None
-        )
+    for exam_id, title, count, last_at, highs in rows:
         items.append(
             {
                 "id": f"proctoring-violations-{exam_id}",
@@ -88,7 +75,7 @@ def _violations_per_exam(db, since, extra_filters):
                 "title": "Pelanggaran proctoring terdeteksi",
                 "body": f"{count} pelanggaran (sedang/berat) pada ujian '{title}' dalam 24 jam terakhir.",
                 "created_at": _iso(last_at),
-                "severity": "critical" if has_high else "warning",
+                "severity": "critical" if (highs or 0) > 0 else "warning",
             }
         )
     return items
