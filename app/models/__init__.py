@@ -8,6 +8,7 @@ from app.models.session import ExamSession, StudentAnswer, AutosaveSnapshot
 from app.models.proctoring import ProctoringLog
 from app.models.verification import EmailVerification
 from app.models.secret import SystemSecret
+from app.models.pricing_plan import PricingPlan
 
 __all__ = [
     "Base",
@@ -26,4 +27,5 @@ __all__ = [
     "ProctoringLog",
     "EmailVerification",
     "SystemSecret",
+    "PricingPlan",
 ]

@@ -776,16 +776,12 @@ def get_superadmin_finance_analytics(
             .all()
         )
 
-    # Plan rates (in IDR)
-    PLAN_PRICES = {
-        "starter": 1500000,
-        "pro": 3500000,
-        "enterprise": 7500000,
-    }
+    # Plan rates (in IDR) — from the DB-backed pricing plans (superadmin-editable)
+    PLAN_PRICES = get_plan_price_map(db)
 
     mrr = 0
-    plan_distribution = {"starter": 0, "pro": 0, "enterprise": 0}
-    plan_revenue = {"starter": 0, "pro": 0, "enterprise": 0}
+    plan_distribution = {plan_id: 0 for plan_id in PLAN_PRICES}
+    plan_revenue = {plan_id: 0 for plan_id in PLAN_PRICES}
 
     for t in tenants:
         if t.is_active and t.subscription_status in ("active", "trial"):
@@ -926,14 +922,97 @@ def get_superadmin_finance_analytics(
 # ---------------------------------------------------------------------------
 
 from app.core.billing_defaults import (
-    DEFAULT_PRICING_PLANS,
     DEFAULT_AI_CREDITS_CONFIG,
     DEFAULT_PROMO_CODES,
 )
+from app.services.billing.pricing_plans import (
+    get_plan_price_map,
+    get_pricing_plans as fetch_pricing_plans,
+    update_pricing_plan,
+)
 
 @router.get("/pricing-plans")
-def get_pricing_plans(current_user: User = Depends(require_admin)):
-    return ApiResponse.ok(data=DEFAULT_PRICING_PLANS, message="Paket langganan berhasil dimuat")
+def get_pricing_plans(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    return ApiResponse.ok(data=fetch_pricing_plans(db), message="Paket langganan berhasil dimuat")
+
+_PRICING_INT_FIELDS = (
+    "price_monthly",
+    "price_annually",
+    "max_students",
+    "max_teachers",
+    "max_storage_gb",
+    "ai_credits_monthly",
+)
+_PRICING_ALL_FIELDS = (
+    ("name",) + _PRICING_INT_FIELDS + ("proctoring_type", "description", "features", "is_popular")
+)
+
+def _validate_pricing_payload(payload: dict) -> dict:
+    """Validate a full pricing-plan update body; returns cleaned fields."""
+    def _invalid(message: str):
+        raise AppException(
+            message=message,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            error_code="VALIDATION_ERROR",
+        )
+
+    if not isinstance(payload, dict):
+        _invalid("Body harus berupa objek JSON")
+
+    missing = [f for f in _PRICING_ALL_FIELDS if f not in payload]
+    if missing:
+        _invalid(f"Field wajib belum diisi: {', '.join(missing)}")
+
+    cleaned = {}
+
+    name = payload.get("name")
+    if not isinstance(name, str) or not name.strip():
+        _invalid("Nama paket tidak boleh kosong")
+    cleaned["name"] = name.strip()
+
+    for field in _PRICING_INT_FIELDS:
+        value = payload.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            _invalid(f"Field {field} harus berupa bilangan bulat >= 0")
+        cleaned[field] = value
+
+    proctoring_type = payload.get("proctoring_type")
+    if proctoring_type not in ("single_camera", "dual_camera"):
+        _invalid("proctoring_type harus 'single_camera' atau 'dual_camera'")
+    cleaned["proctoring_type"] = proctoring_type
+
+    description = payload.get("description")
+    if not isinstance(description, str):
+        _invalid("Field description harus berupa teks")
+    cleaned["description"] = description
+
+    features = payload.get("features")
+    if not isinstance(features, list) or not all(isinstance(f, str) for f in features):
+        _invalid("Field features harus berupa daftar teks")
+    cleaned["features"] = features
+
+    is_popular = payload.get("is_popular")
+    if not isinstance(is_popular, bool):
+        _invalid("Field is_popular harus berupa boolean")
+    cleaned["is_popular"] = is_popular
+
+    return cleaned
+
+@router.put("/pricing-plans/{plan_id}")
+def update_pricing_plan_endpoint(
+    plan_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin),
+):
+    cleaned = _validate_pricing_payload(payload)
+    updated = update_pricing_plan(db, plan_id, cleaned)
+    if updated is None:
+        raise AppException(message="Paket tidak ditemukan", status_code=status.HTTP_404_NOT_FOUND)
+    return ApiResponse.ok(data=updated, message=f"Paket {updated['name']} berhasil diperbarui")
 
 @router.get("/ai-credits")
 def get_ai_credits_config(current_user: User = Depends(require_admin)):

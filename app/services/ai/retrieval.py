@@ -15,18 +15,11 @@ from app.models.secret import SystemSecret
 from app.core.exceptions import AppException
 from app.core.cache import memory_cache
 from app.core.billing_defaults import (
-    DEFAULT_PRICING_PLANS,
     DEFAULT_AI_CREDITS_CONFIG,
     DEFAULT_PROMO_CODES,
 )
+from app.services.billing.pricing_plans import get_plan_price_map, get_pricing_plans
 from fastapi import status
-
-# Plan rates (in IDR) - matching app/api/v1/endpoints/superadmin.py PLAN_PRICES
-PLAN_PRICES = {
-    "starter": 1500000,
-    "pro": 3500000,
-    "enterprise": 7500000,
-}
 
 logger = logging.getLogger(__name__)
 
@@ -274,11 +267,12 @@ def build_scoped_user_context(user: User, db: Session, query: Optional[str] = No
         )
         lines.append("")
 
-        # 2. Finance Summary (MRR, ARR, ARPU)
+        # 2. Finance Summary (MRR, ARR, ARPU) — prices from DB-backed plans
+        plan_prices = get_plan_price_map(db)
         mrr = 0
         for t in all_tenants:
             if t.is_active and t.subscription_status in ("active", "trial"):
-                price = PLAN_PRICES.get(t.subscription_plan, 3500000)
+                price = plan_prices.get(t.subscription_plan, 3500000)
                 mrr += price
         arr = mrr * 12
         active_count = sum(1 for t in all_tenants if t.is_active)
@@ -453,7 +447,7 @@ def build_scoped_user_context(user: User, db: Session, query: Optional[str] = No
                 )
 
         lines.append("Daftar Paket Langganan:")
-        for plan in DEFAULT_PRICING_PLANS:
+        for plan in get_pricing_plans(db):
             price_m = f"Rp {plan.get('price_monthly', 0):,}".replace(",", ".")
             price_y = f"Rp {plan.get('price_annually', 0):,}".replace(",", ".")
             credits_m = f"{plan.get('ai_credits_monthly', 0):,}".replace(",", ".")
@@ -628,7 +622,7 @@ def build_scoped_user_context(user: User, db: Session, query: Optional[str] = No
                 )
 
         lines.append("Daftar Paket Langganan:")
-        for plan in DEFAULT_PRICING_PLANS:
+        for plan in get_pricing_plans(db):
             price_m = f"Rp {plan.get('price_monthly', 0):,}".replace(",", ".")
             price_y = f"Rp {plan.get('price_annually', 0):,}".replace(",", ".")
             credits_m = f"{plan.get('ai_credits_monthly', 0):,}".replace(",", ".")

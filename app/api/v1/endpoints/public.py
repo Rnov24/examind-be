@@ -10,13 +10,13 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.billing_defaults import DEFAULT_PRICING_PLANS
 from app.core.database import get_db
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.models.exam import Exam
 from app.models.session import ExamSession
 from app.schemas.common import ApiResponse
+from app.services.billing.pricing_plans import get_pricing_plans
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def get_landing_data(db: Session = Depends(get_db)):
 
     return ApiResponse.ok(
         data={
-            "plans": DEFAULT_PRICING_PLANS,
+            "plans": get_pricing_plans(db),
             "stats": stats,
         },
         message="Data publik landing berhasil dimuat",
