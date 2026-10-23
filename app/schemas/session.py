@@ -26,6 +26,10 @@ class ExamStartResponse(BaseModel):
     companion_qr_url: str
     duration_remaining_seconds: int
     questions: List[Dict[str, Any]]
+    # ISO timestamp when the student actually began answering (after the
+    # setup wizard); None while still preparing. Lets the client skip the
+    # wizard on a mid-exam resume.
+    begun_at: Optional[datetime] = None
 
 
 class SubmitExamRequest(BaseModel):

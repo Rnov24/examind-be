@@ -113,10 +113,13 @@ def start_exam(
         randomize_options=exam.randomize_options,
     )
 
-    # Calculate remaining seconds
-    elapsed_seconds = int((datetime.utcnow() - session.start_time).total_seconds())
-    total_allowed_seconds = exam.duration_minutes * 60
-    remaining_seconds = max(0, total_allowed_seconds - elapsed_seconds)
+    # Calculate remaining seconds — the clock runs from begun_at when the
+    # student has finished the setup wizard; before that, no time is consumed.
+    if session.begun_at:
+        elapsed_seconds = int((datetime.utcnow() - session.begun_at).total_seconds())
+        remaining_seconds = max(0, exam.duration_minutes * 60 - elapsed_seconds)
+    else:
+        remaining_seconds = exam.duration_minutes * 60
 
     # Load any previously autosaved answers for resume
     cached_answers = {}
@@ -145,8 +148,57 @@ def start_exam(
         companion_qr_url=f"/companion/pair?session_id={session.id}&token={pairing_token}",
         duration_remaining_seconds=remaining_seconds,
         questions=shuffled_questions,
+        begun_at=session.begun_at,
     )
     return ApiResponse.ok(data=res, message="Sesi ujian dimulai")
+
+
+@router.post("/exam/{exam_id}/begin")
+def begin_exam(
+    exam_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_student),
+):
+    """Mark the moment the student actually starts answering (after the
+    camera-setup wizard). Idempotent: only the first call sets begun_at,
+    so reloads/resumes never reset the clock."""
+    exam = db.query(Exam).filter(Exam.id == exam_id).first()
+    if not exam:
+        raise AppException(
+            message="Paket ujian tidak ditemukan.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            error_code="EXAM_NOT_FOUND",
+        )
+    session = (
+        db.query(ExamSession)
+        .filter(ExamSession.exam_id == exam_id, ExamSession.student_id == current_user.id)
+        .first()
+    )
+    if not session:
+        raise AppException(
+            message="Sesi ujian tidak ditemukan. Muat ulang halaman ujian.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            error_code="SESSION_NOT_FOUND",
+        )
+    if session.status != "in_progress":
+        raise AppException(
+            message="Sesi ujian sudah tidak aktif.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="SESSION_NOT_ACTIVE",
+        )
+    if session.begun_at is None:
+        session.begun_at = datetime.utcnow()
+        db.commit()
+        db.refresh(session)
+    elapsed = int((datetime.utcnow() - session.begun_at).total_seconds())
+    remaining = max(0, exam.duration_minutes * 60 - elapsed)
+    return ApiResponse.ok(
+        data={
+            "begun_at": session.begun_at.isoformat(),
+            "duration_remaining_seconds": remaining,
+        },
+        message="Ujian dimulai",
+    )
 
 
 @router.post("/exam/{exam_id}/autosave", response_model=ApiResponse[AutosaveResponse])

@@ -11,6 +11,10 @@ class ExamSession(Base):
     exam_id = Column(Integer, ForeignKey("exams.id", ondelete="CASCADE"), nullable=False, index=True)
     student_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     start_time = Column(DateTime, default=datetime.utcnow, nullable=False)
+    # When the student actually began answering (after the camera-setup
+    # wizard). NULL = still preparing; the exam clock runs from begun_at
+    # when set so setup time never eats into the exam duration.
+    begun_at = Column(DateTime, nullable=True)
     submit_time = Column(DateTime, nullable=True)
     status = Column(
         Enum("in_progress", "submitted", "grading_in_progress", "graded", "aborted", name="session_statuses"),
