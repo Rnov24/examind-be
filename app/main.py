@@ -75,11 +75,40 @@ app.include_router(ws_router)
 
 @app.get("/health", tags=["System"])
 def health_check():
+    # Liveness + real database roundtrip check. Never raises: if the DB is
+    # unreachable the API is still up, so report "degraded" with HTTP 200.
+    import time as _time
+
+    from sqlalchemy import text as _text
+
+    from app.core.database import SessionLocal
+
+    db_status = "error"
+    db_latency_ms = None
+    db = None
+    try:
+        db = SessionLocal()
+        started = _time.perf_counter()
+        db.execute(_text("SELECT 1"))
+        db_latency_ms = int(round((_time.perf_counter() - started) * 1000))
+        db_status = "online"
+    except Exception:
+        db_status = "error"
+        db_latency_ms = None
+    finally:
+        if db is not None:
+            try:
+                db.close()
+            except Exception:
+                pass
+
     return {
-        "status": "healthy",
+        "status": "healthy" if db_status == "online" else "degraded",
         "service": "EXAMIND Backend API",
         "version": "1.0.1",
         "environment": settings.ENVIRONMENT,
+        "db_status": db_status,
+        "db_latency_ms": db_latency_ms,
     }
 
 

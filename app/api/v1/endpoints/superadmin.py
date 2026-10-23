@@ -917,6 +917,76 @@ def get_superadmin_finance_analytics(
     )
 
 
+@router.get("/telemetry")
+def get_superadmin_telemetry(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin),
+):
+    """Daily exam-session activity for the last 7 days (including today).
+
+    Day buckets follow Asia/Jakarta calendar days; timestamps are stored in
+    UTC, so each timestamp is shifted +7h in Python before bucketing.
+    """
+    from app.models.session import ExamSession
+
+    JAKARTA_OFFSET = timedelta(hours=7)
+    now_jakarta = datetime.utcnow() + JAKARTA_OFFSET
+    today_jakarta = now_jakarta.date()
+    days = [today_jakarta - timedelta(days=i) for i in range(6, -1, -1)]
+
+    # UTC window covering the oldest Jakarta day 00:00 through tomorrow 00:00.
+    window_start_utc = datetime.combine(days[0], datetime.min.time()) - JAKARTA_OFFSET
+    window_end_utc = (
+        datetime.combine(today_jakarta + timedelta(days=1), datetime.min.time())
+        - JAKARTA_OFFSET
+    )
+
+    started_counts = {d: 0 for d in days}
+    submitted_counts = {d: 0 for d in days}
+
+    started_rows = (
+        db.query(ExamSession.start_time)
+        .filter(
+            ExamSession.start_time >= window_start_utc,
+            ExamSession.start_time < window_end_utc,
+        )
+        .all()
+    )
+    for (ts,) in started_rows:
+        if ts is not None:
+            bucket = (ts + JAKARTA_OFFSET).date()
+            if bucket in started_counts:
+                started_counts[bucket] += 1
+
+    submitted_rows = (
+        db.query(ExamSession.submit_time)
+        .filter(
+            ExamSession.submit_time.isnot(None),
+            ExamSession.submit_time >= window_start_utc,
+            ExamSession.submit_time < window_end_utc,
+        )
+        .all()
+    )
+    for (ts,) in submitted_rows:
+        if ts is not None:
+            bucket = (ts + JAKARTA_OFFSET).date()
+            if bucket in submitted_counts:
+                submitted_counts[bucket] += 1
+
+    series = [
+        {
+            "date": d.isoformat(),
+            "sessions_started": started_counts[d],
+            "sessions_submitted": submitted_counts[d],
+        }
+        for d in days
+    ]
+    return ApiResponse.ok(
+        data={"series": series},
+        message="Data telemetri sesi ujian 7 hari terakhir berhasil dimuat",
+    )
+
+
 # ---------------------------------------------------------------------------
 # PRICING, AI CREDITS & PROMO MANAGEMENT ENDPOINTS
 # ---------------------------------------------------------------------------

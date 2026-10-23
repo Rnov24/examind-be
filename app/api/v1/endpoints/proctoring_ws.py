@@ -78,7 +78,7 @@ async def ws_companion(websocket: WebSocket, session_id: int, token: str = Query
 
             # 1. Edge CV snapshot preview frame for teacher monitor
             if msg_type == "COMPANION_FRAME" and exam_id:
-                frame_data = msg.get("frame")
+                frame_data = msg.get("frame") or msg.get("snapshot_url")
                 metrics = msg.get("metrics", {})
                 await ws_hub.broadcast_to_exam(exam_id, {
                     "event": "COMPANION_FRAME_UPDATE",
