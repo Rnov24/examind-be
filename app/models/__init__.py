@@ -9,6 +9,7 @@ from app.models.proctoring import ProctoringLog
 from app.models.verification import EmailVerification
 from app.models.secret import SystemSecret
 from app.models.pricing_plan import PricingPlan
+from app.models.inquiry import Inquiry
 
 __all__ = [
     "Base",
@@ -28,4 +29,5 @@ __all__ = [
     "EmailVerification",
     "SystemSecret",
     "PricingPlan",
+    "Inquiry",
 ]

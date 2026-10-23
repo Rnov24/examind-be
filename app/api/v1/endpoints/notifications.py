@@ -203,6 +203,32 @@ def _superadmin_items(db):
     except Exception as e:
         logger.warning(f"[Notifications] high violations query failed: {e}")
 
+    # New consultation inquiries from the landing page (last 7 days, still open)
+    try:
+        from app.models.inquiry import Inquiry
+
+        inquiries = (
+            db.query(Inquiry)
+            .filter(Inquiry.created_at >= now - timedelta(days=7), Inquiry.status == "new")
+            .order_by(Inquiry.created_at.desc())
+            .all()
+        )
+        for inq in inquiries:
+            items.append(
+                {
+                    "id": f"inquiry-new-{inq.id}",
+                    "kind": "new_inquiry",
+                    "title": "Permohonan konsultasi baru",
+                    "body": f"{inq.full_name} dari {inq.school_name} mengajukan konsultasi"
+                    + (f" ({inq.package_interest})" if inq.package_interest else "")
+                    + ".",
+                    "created_at": _iso(inq.created_at),
+                    "severity": "info",
+                }
+            )
+    except Exception as e:
+        logger.warning(f"[Notifications] new inquiries query failed: {e}")
+
     return items
 
 

@@ -1448,3 +1448,57 @@ def delete_registration_code(
 
 
 
+
+
+# ── Landing-page consultation inquiries ──────────────────────────────────────
+from app.models.inquiry import Inquiry as _Inquiry
+
+
+@router.get("/inquiries")
+def list_inquiries(
+    status_filter: Optional[str] = Query(default=None, alias="status"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin),
+):
+    """Real consultation inquiries submitted from the public landing page."""
+    q = db.query(_Inquiry)
+    if status_filter:
+        q = q.filter(_Inquiry.status == status_filter)
+    rows = q.order_by(_Inquiry.created_at.desc()).limit(100).all()
+    items = [
+        {
+            "id": r.id,
+            "full_name": r.full_name,
+            "role": r.role,
+            "school_name": r.school_name,
+            "whatsapp": r.whatsapp,
+            "package_interest": r.package_interest,
+            "student_count_range": r.student_count_range,
+            "notes": r.notes,
+            "status": r.status,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
+    return ApiResponse.ok(data={"items": items, "total": len(items)}, message="Daftar permohonan konsultasi berhasil dimuat")
+
+
+class InquiryStatusUpdate(BaseModel):
+    status: str  # new | contacted | closed
+
+
+@router.patch("/inquiries/{inquiry_id}")
+def update_inquiry_status(
+    inquiry_id: int,
+    payload: InquiryStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superadmin),
+):
+    if payload.status not in ("new", "contacted", "closed"):
+        raise AppException(message="Status tidak valid", status_code=status.HTTP_400_BAD_REQUEST)
+    row = db.query(_Inquiry).filter(_Inquiry.id == inquiry_id).first()
+    if not row:
+        raise AppException(message="Permohonan tidak ditemukan", status_code=status.HTTP_404_NOT_FOUND)
+    row.status = payload.status
+    db.commit()
+    return ApiResponse.ok(data={"id": row.id, "status": row.status}, message="Status permohonan diperbarui")

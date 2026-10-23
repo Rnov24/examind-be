@@ -394,7 +394,7 @@ class MockAIService(AIServiceInterface):
             )
         else:
             return (
-                f"Halo! Saya EXAMIND AI Assistant. Berdasarkan data akun Anda, saya dapat membantu memeriksa "
+                f"Halo! Saya EXA, asisten EXAMIND. Berdasarkan data akun Anda, saya dapat membantu memeriksa "
                 f"nilai ujian terakhir, jadwal ujian mendatang, ringkasan rekapitulasi nilai, serta menjawab pertanyaan pembelajaran. "
                 f"Silakan ketik pertanyaan Anda atau pilih salah satu menu pintas di bawah!"
             )
