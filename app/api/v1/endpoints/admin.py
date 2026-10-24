@@ -8,6 +8,7 @@ from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import require_admin
 from app.core.security import get_password_hash
+from app.core.tenant_scope import is_superadmin, user_in_scope
 from app.core.timing import log_query_timing
 from app.models.user import User
 from app.models.academic import Class
@@ -109,6 +110,17 @@ def get_admin_stats(
         disqualified_sessions = session_counts.get("disqualified", 0)
 
         active_cameras = len(ws_hub.companion_streams)
+        if not is_superadmin(current_user) and current_user.tenant_id is not None:
+            # Scope the live-camera count to this tenant: companion streams
+            # are keyed by session id; resolve each session's student tenant.
+            tenant_session_ids = {
+                s.id
+                for s in db.query(ExamSession.id)
+                .join(User, ExamSession.student_id == User.id)
+                .filter(User.tenant_id == current_user.tenant_id)
+                .all()
+            }
+            active_cameras = sum(1 for sid in ws_hub.companion_streams if sid in tenant_session_ids)
 
         stats = AdminStatsResponse(
             total_users=total_users,
@@ -139,6 +151,10 @@ def list_users(
 ):
     with log_query_timing("list_users"):
         query = db.query(User)
+        # Tenant isolation: a school admin lists ONLY their own school's users.
+        # Superadmin (tenant_id NULL) legitimately sees everyone.
+        if not is_superadmin(current_user):
+            query = query.filter(User.tenant_id == current_user.tenant_id)
         if role and role != "all":
             query = query.filter(User.role == role)
         if search:
@@ -190,6 +206,11 @@ def create_user_by_admin(
         full_name=payload.full_name,
         role=payload.role,
         avatar_url=payload.avatar_url,
+        # Tenant isolation: a school admin can only create users inside
+        # their own school. The tenant is derived from the caller, never
+        # from the request (the payload has no tenant field by design).
+        # A superadmin creating here keeps tenant_id NULL (legacy behavior).
+        tenant_id=None if is_superadmin(current_user) else current_user.tenant_id,
         is_active=True,
     )
     db.add(new_user)
@@ -213,7 +234,9 @@ def toggle_user_status(
         )
 
     target_user = db.query(User).filter(User.id == user_id).first()
-    if not target_user:
+    if not target_user or not user_in_scope(db, current_user, target_user):
+        # 404 (not 403) so a school admin cannot probe whether a user id
+        # exists in another school.
         raise AppException(
             message="Pengguna tidak ditemukan.",
             status_code=status.HTTP_404_NOT_FOUND,

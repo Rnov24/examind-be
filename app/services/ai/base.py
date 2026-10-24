@@ -10,7 +10,8 @@ class AIServiceInterface(ABC):
 
     @abstractmethod
     def grade_essay(
-        self, prompt: str, rubric: Dict[str, Any], ideal_answer: str, student_answer: str
+        self, prompt: str, rubric: Dict[str, Any], ideal_answer: str, student_answer: str,
+        allocated_points: float = 10.0,
     ) -> Dict[str, Any]:
         pass
 

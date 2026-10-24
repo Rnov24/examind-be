@@ -24,6 +24,12 @@ class ExamSession(Base):
     total_score = Column(Numeric(5, 2), default=0.00)
     integrity_score = Column(Integer, default=100)
     companion_paired = Column(Boolean, default=False)
+    # Secret pairing token for the mobile companion camera (shown as QR).
+    # Persisted so the companion WebSocket can validate it — before this
+    # column existed the token was regenerated per /start call and never
+    # checked, so anyone could connect as companion to any session and
+    # inject fake violations. NULL = legacy session (migration window).
+    pairing_token = Column(String(64), nullable=True)
     client_ip = Column(String(45), nullable=True)
     user_agent = Column(Text, nullable=True)
 

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import get_current_active_user, require_teacher, require_teacher_or_admin
+from app.core.tenant_scope import is_superadmin, require_class
 from app.core.timing import log_query_timing
 from app.models.user import User
 from app.models.academic import Class, ClassMember
@@ -30,7 +31,14 @@ def get_classes(
 ):
     with log_query_timing("get_classes"):
         if current_user.role == "admin":
-            query = db.query(Class)
+            # Tenant isolation: only classes created by teachers of this school.
+            if is_superadmin(current_user):
+                query = db.query(Class)
+            else:
+                teacher_ids = db.query(User.id).filter(
+                    User.tenant_id == current_user.tenant_id, User.role == "teacher"
+                )
+                query = db.query(Class).filter(Class.created_by.in_(teacher_ids))
         elif current_user.role == "teacher":
             query = db.query(Class).filter(Class.created_by == current_user.id)
         else:  # student
@@ -125,21 +133,18 @@ def get_class_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
+    # Tenant/ownership isolation: 404 when the class does not exist OR the
+    # caller may not see it (other school, or a student/teacher not in it).
+    cls = require_class(db, current_user, class_id)
     cls = (
         db.query(Class)
         .options(
             selectinload(Class.members).selectinload(ClassMember.user),
             joinedload(Class.creator),
         )
-        .filter(Class.id == class_id)
+        .filter(Class.id == cls.id)
         .first()
     )
-    if not cls:
-        raise AppException(
-            message="Kelas tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="CLASS_NOT_FOUND",
-        )
 
     # Convert members
     members_data = []
@@ -177,20 +182,8 @@ def update_class(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
-    cls = db.query(Class).filter(Class.id == class_id).first()
-    if not cls:
-        raise AppException(
-            message="Kelas tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="CLASS_NOT_FOUND",
-        )
-
-    if current_user.role != "admin" and cls.created_by != current_user.id:
-        raise AppException(
-            message="Anda tidak memiliki izin untuk mengubah kelas ini.",
-            status_code=status.HTTP_403_FORBIDDEN,
-            error_code="FORBIDDEN",
-        )
+    # Write access: class owner, tenant admin, or superadmin — 404 otherwise.
+    cls = require_class(db, current_user, class_id, write=True)
 
     if request.name is not None:
         cls.name = request.name
@@ -221,20 +214,8 @@ def delete_class(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
-    cls = db.query(Class).filter(Class.id == class_id).first()
-    if not cls:
-        raise AppException(
-            message="Kelas tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="CLASS_NOT_FOUND",
-        )
-
-    if current_user.role != "admin" and cls.created_by != current_user.id:
-        raise AppException(
-            message="Anda tidak memiliki izin untuk menghapus kelas ini.",
-            status_code=status.HTTP_403_FORBIDDEN,
-            error_code="FORBIDDEN",
-        )
+    # Write access: class owner, tenant admin, or superadmin — 404 otherwise.
+    cls = require_class(db, current_user, class_id, write=True)
 
     db.delete(cls)
     db.commit()
@@ -248,13 +229,7 @@ def add_class_member(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
-    cls = db.query(Class).filter(Class.id == class_id).first()
-    if not cls:
-        raise AppException(
-            message="Kelas tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="CLASS_NOT_FOUND",
-        )
+    cls = require_class(db, current_user, class_id, write=True)
 
     target_user = db.query(User).filter(User.id == request.user_id).first()
     if not target_user:
@@ -263,6 +238,18 @@ def add_class_member(
             status_code=status.HTTP_404_NOT_FOUND,
             error_code="USER_NOT_FOUND",
         )
+    # Tenant isolation: the added member must belong to the same school as
+    # the class (superadmin exempt). Without this, a school admin could
+    # pull students of another school into their class.
+    if not is_superadmin(current_user):
+        creator = cls.creator or db.query(User).filter(User.id == cls.created_by).first()
+        class_tenant = creator.tenant_id if creator else None
+        if target_user.tenant_id != class_tenant:
+            raise AppException(
+                message="Pengguna yang dipilih tidak ditemukan.",
+                status_code=status.HTTP_404_NOT_FOUND,
+                error_code="USER_NOT_FOUND",
+            )
 
     # Check if already a member
     existing = (
@@ -304,6 +291,10 @@ def remove_class_member(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
+    # Write access on the class (owner / tenant admin / superadmin) — 404
+    # when the class is not the caller's, so membership cannot be probed
+    # or removed cross-tenant.
+    require_class(db, current_user, class_id, write=True)
     member = (
         db.query(ClassMember)
         .filter(ClassMember.class_id == class_id, ClassMember.user_id == user_id)
@@ -330,6 +321,17 @@ def get_all_students(
 ):
     with log_query_timing("get_all_students"):
         query = db.query(User).filter(User.role == "student", User.is_active == True)
+        # Tenant isolation: an admin sees only their school's students; a
+        # teacher sees only students enrolled in classes they created.
+        if not is_superadmin(current_user):
+            if current_user.role == "admin":
+                query = query.filter(User.tenant_id == current_user.tenant_id)
+            else:  # teacher
+                own_class_ids = db.query(Class.id).filter(Class.created_by == current_user.id)
+                student_ids = db.query(ClassMember.user_id).filter(
+                    ClassMember.class_id.in_(own_class_ids)
+                )
+                query = query.filter(User.id.in_(student_ids))
         total = query.count()
         students = (
             query.order_by(User.id.desc())

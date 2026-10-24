@@ -166,6 +166,7 @@ def grade_exam_session_async(session_id: int):
                     rubric=rubric,
                     ideal_answer=ideal,
                     student_answer=student_resp,
+                    allocated_points=allocated_points,
                 )
 
                 # Normalized essay score mapped to allocated points

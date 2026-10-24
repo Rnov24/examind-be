@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import get_current_active_user, require_teacher
+from app.core.tenant_scope import is_superadmin, require_bank
 from app.core.timing import log_query_timing
 from app.models.user import User
 from app.models.question import QuestionBank, Question
@@ -33,7 +34,14 @@ def list_question_banks(
 ):
     with log_query_timing("list_question_banks"):
         if current_user.role == "admin":
-            query = db.query(QuestionBank)
+            # Tenant isolation: only banks owned by teachers of this school.
+            if is_superadmin(current_user):
+                query = db.query(QuestionBank)
+            else:
+                teacher_ids = db.query(User.id).filter(
+                    User.tenant_id == current_user.tenant_id, User.role == "teacher"
+                )
+                query = db.query(QuestionBank).filter(QuestionBank.teacher_id.in_(teacher_ids))
         else:
             query = db.query(QuestionBank).filter(QuestionBank.teacher_id == current_user.id)
 
@@ -112,18 +120,15 @@ def get_question_bank_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
+    # 404 when the bank does not exist OR belongs to another school /
+    # another teacher — the full question list (incl. answers) is returned.
+    bank = require_bank(db, current_user, bank_id)
     bank = (
         db.query(QuestionBank)
         .options(selectinload(QuestionBank.questions))
-        .filter(QuestionBank.id == bank_id)
+        .filter(QuestionBank.id == bank.id)
         .first()
     )
-    if not bank:
-        raise AppException(
-            message="Bank soal tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="BANK_NOT_FOUND",
-        )
 
     res = QuestionBankDetailResponse(
         id=bank.id,
@@ -145,20 +150,8 @@ def update_question_bank(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
-    bank = db.query(QuestionBank).filter(QuestionBank.id == bank_id).first()
-    if not bank:
-        raise AppException(
-            message="Bank soal tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="BANK_NOT_FOUND",
-        )
-
-    if current_user.role != "admin" and bank.teacher_id != current_user.id:
-        raise AppException(
-            message="Anda tidak berhak mengubah bank soal ini.",
-            status_code=status.HTTP_403_FORBIDDEN,
-            error_code="FORBIDDEN",
-        )
+    # Write access: bank owner, tenant admin, or superadmin — 404 otherwise.
+    bank = require_bank(db, current_user, bank_id)
 
     if request.title is not None:
         bank.title = request.title
@@ -188,20 +181,8 @@ def delete_question_bank(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
-    bank = db.query(QuestionBank).filter(QuestionBank.id == bank_id).first()
-    if not bank:
-        raise AppException(
-            message="Bank soal tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="BANK_NOT_FOUND",
-        )
-
-    if current_user.role != "admin" and bank.teacher_id != current_user.id:
-        raise AppException(
-            message="Anda tidak berhak menghapus bank soal ini.",
-            status_code=status.HTTP_403_FORBIDDEN,
-            error_code="FORBIDDEN",
-        )
+    # Write access: bank owner, tenant admin, or superadmin — 404 otherwise.
+    bank = require_bank(db, current_user, bank_id)
 
     db.delete(bank)
     db.commit()
@@ -217,13 +198,7 @@ def add_question_item(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
-    bank = db.query(QuestionBank).filter(QuestionBank.id == bank_id).first()
-    if not bank:
-        raise AppException(
-            message="Bank soal tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="BANK_NOT_FOUND",
-        )
+    bank = require_bank(db, current_user, bank_id)
 
     # Convert Pydantic schemas to serializable JSON dicts if needed
     options_data = None
@@ -274,6 +249,9 @@ def update_question_item(
             status_code=status.HTTP_404_NOT_FOUND,
             error_code="QUESTION_NOT_FOUND",
         )
+    # Scope via the owning bank: 404 when the question belongs to another
+    # school's bank or another teacher's bank.
+    require_bank(db, current_user, question.bank_id)
 
     if request.question_type is not None:
         question.question_type = request.question_type
@@ -319,6 +297,8 @@ def delete_question_item(
             status_code=status.HTTP_404_NOT_FOUND,
             error_code="QUESTION_NOT_FOUND",
         )
+    # Scope via the owning bank (see update above).
+    require_bank(db, current_user, question.bank_id)
 
     db.delete(question)
     db.commit()

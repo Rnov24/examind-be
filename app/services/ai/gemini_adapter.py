@@ -312,14 +312,26 @@ class GeminiAdapter(AIServiceInterface):
             '      "bloom_level": "C3",\n'
             '      "sample_answer": "Jawaban acuan ringkas 1-2 kalimat",\n'
             '      "ref_points": [\n'
-            '        {"id": "p1", "statement": "Kriteria/konsep kunci 1 yang harus ada", "weight": 0.5},\n'
-            '        {"id": "p2", "statement": "Kriteria/konsep kunci 2 yang harus ada", "weight": 0.5}\n'
+            '        {"id": "p1", "statement": "Konsep inti 1 yang harus ada", "weight": 0.4},\n'
+            '        {"id": "p2", "statement": "Argumen/bukti 2 yang harus ada", "weight": 0.3},\n'
+            '        {"id": "p3", "statement": "Istilah teknis 3 yang harus ada", "weight": 0.15},\n'
+            '        {"id": "p4", "statement": "Kejelasan/struktur 4 yang harus ada", "weight": 0.15}\n'
             '      ],\n'
-            '      "rubric": {"dimension_1_concept": 50, "dimension_2_argument": 50},\n'
-            '      "points": 10.0\n'
-            "    }\n"
-            "  ]\n"
-            "}"
+            '      "rubric": {\n'
+            '        "dimension_1_concept": {"max": 40, "weight_pct": 40, "criteria": "Penguasaan konsep inti dan esensi topik"},\n'
+            '        "dimension_2_argument": {"max": 30, "weight_pct": 30, "criteria": "Kelengkapan bukti dan alur penalaran logis"},\n'
+            '        "dimension_3_terminology": {"max": 15, "weight_pct": 15, "criteria": "Ketepatan istilah teknis baku bidang terkait"},\n'
+            '        "dimension_4_clarity": {"max": 15, "weight_pct": 15, "criteria": "Runtutan paragraf dan kaidah bahasa Indonesia yang baik"}\n'
+            '      },\n'
+            '      "points": 20.0\n'
+            '    }\n'
+            '  ]\n'
+            '}"\n'
+            'ATURAN RUBRIK (WAJIB): ref_points WAJIB ada untuk setiap soal esai, bobotnya \n'
+            'HARUS berjumlah 1.0, dan bobot tiap ref_point HARUS sama dengan weight_pct \n'
+            'dimensi rubrik yang bersesuaian (Konsep 0.40, Argumen 0.30, Terminologi 0.15, \n'
+            'Kejelasan 0.15) — penilai memakai ref_points dan bobot ini apa adanya, jadi \n'
+            'angka yang kamu tulis di sini adalah angka yang menentukan nilai siswa.\n'
         )
 
         user_prompt = (
@@ -391,7 +403,8 @@ class GeminiAdapter(AIServiceInterface):
         return mock_ai_service.generate_questions(request)
 
     def grade_essay(
-        self, prompt: str, rubric: Dict[str, Any], ideal_answer: str, student_answer: str
+        self, prompt: str, rubric: Dict[str, Any], ideal_answer: str, student_answer: str,
+        allocated_points: float = 10.0,
     ) -> Dict[str, Any]:
         # 1. High-Efficiency Respan Span-01 Lite Decision Model
         try:
@@ -403,6 +416,7 @@ class GeminiAdapter(AIServiceInterface):
                     rubric=rubric,
                     ideal_answer=ideal_answer,
                     student_answer=student_answer,
+                    allocated_points=allocated_points,
                 )
                 if res and "total_score" in res:
                     evals = res.get("rationale_json", {}).get("evaluations", [])
@@ -434,9 +448,28 @@ class GeminiAdapter(AIServiceInterface):
         except Exception as respan_err:
             logger.warning(f"[GeminiAdapter] Respan evaluation exception: {respan_err}")
 
+        # Maxima come from the question's own rubric when it carries them
+        # (canonical 4D: 40/30/15/15). The old code hardcoded these numbers
+        # even when the stored rubric promised different maxima.
+        def _dim_max(key, default):
+            v = rubric.get(key) if isinstance(rubric, dict) else None
+            if isinstance(v, dict):
+                try:
+                    return float(v.get("max", default))
+                except (TypeError, ValueError):
+                    return float(default)
+            if isinstance(v, (int, float)):
+                return float(v)
+            return float(default)
+
+        m1 = _dim_max("dimension_1_concept", 40)
+        m2 = _dim_max("dimension_2_argument", 30)
+        m3 = _dim_max("dimension_3_terminology", 15)
+        m4 = _dim_max("dimension_4_clarity", 15)
+
         system_prompt = (
             "Anda adalah asisten pengoreksi ujian akademik yang objektif dan adil. "
-            "Evaluasi jawaban esai siswa berdasarkan rubrik 4 dimensi (Konsep maks 40, Argumen maks 30, Terminologi maks 15, Kejelasan maks 15). "
+            f"Evaluasi jawaban esai siswa berdasarkan rubrik 4 dimensi (Konsep maks {m1:g}, Argumen maks {m2:g}, Terminologi maks {m3:g}, Kejelasan maks {m4:g}). "
             "Output WAJIB berupa JSON:\n"
             "{\n"
             '  "total_score": 85.0,\n'
@@ -478,7 +511,7 @@ class GeminiAdapter(AIServiceInterface):
             except Exception as e:
                 logger.warning(f"[GeminiAdapter] Essay grading parse error: {e}")
 
-        return mock_ai_service.grade_essay(prompt, rubric, ideal_answer, student_answer)
+        return mock_ai_service.grade_essay(prompt, rubric, ideal_answer, student_answer, allocated_points)
 
     def generate_explanation(
         self, prompt: str, correct_answer: str, student_response: str, is_correct: bool

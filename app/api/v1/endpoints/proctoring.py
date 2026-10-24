@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import get_current_active_user, require_teacher
+from app.core.tenant_scope import require_exam, require_session
 from app.models.user import User
 from app.models.session import ExamSession
 from app.models.proctoring import ProctoringLog
@@ -30,13 +31,12 @@ async def log_proctoring_event(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    session = db.query(ExamSession).filter(ExamSession.id == request.session_id).first()
-    if not session:
-        raise AppException(
-            message="Sesi ujian tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="SESSION_NOT_FOUND",
-        )
+    # Isolation: the event must target a session the caller may touch.
+    # Students log events only for their OWN session; teachers/admins only
+    # for sessions of their exam/tenant. Without this, anyone could inject
+    # fake violations into another student's session and tank their
+    # integrity score.
+    session = require_session(db, current_user, request.session_id)
 
     # Save snapshot if provided
     snapshot_url = None
@@ -109,6 +109,8 @@ def get_exam_proctoring_logs(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
+    # 404 when the exam belongs to another school or another teacher.
+    require_exam(db, current_user, exam_id)
     sessions = db.query(ExamSession).filter(ExamSession.exam_id == exam_id).all()
     session_ids = [s.id for s in sessions]
     if not session_ids:
@@ -160,6 +162,8 @@ def update_teacher_verdict(
             status_code=status.HTTP_404_NOT_FOUND,
             error_code="LOG_NOT_FOUND",
         )
+    # Isolation: the log's session must belong to the caller's exam/tenant.
+    require_session(db, current_user, log.session_id)
 
     log.teacher_verdict = request.verdict
     log.reviewed_by_teacher = True
@@ -184,13 +188,9 @@ async def send_teacher_warning(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
-    session = db.query(ExamSession).filter(ExamSession.id == request.session_id).first()
-    if not session:
-        raise AppException(
-            message="Sesi siswa tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="SESSION_NOT_FOUND",
-        )
+    # Isolation: only the exam's teacher, a tenant admin, or superadmin
+    # may warn / tolerate / disqualify this session.
+    session = require_session(db, current_user, request.session_id)
 
     # Deliver alert straight to student's screen in real-time
     warning_payload = {
@@ -222,13 +222,9 @@ async def tolerate_session_incidents(
     Seluruh catatan log yang belum diverifikasi pelanggaran ditandai sebagai 'ignored_false_positive'
     dan skor integritas dihitung ulang.
     """
-    session = db.query(ExamSession).filter(ExamSession.id == request.session_id).first()
-    if not session:
-        raise AppException(
-            message="Sesi ujian tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="SESSION_NOT_FOUND",
-        )
+    # Isolation: only the exam's teacher, a tenant admin, or superadmin
+    # may adjudicate this session.
+    session = require_session(db, current_user, request.session_id)
 
     # Mark pending logs for this session as ignored_false_positive
     logs = (
@@ -285,13 +281,9 @@ async def deliberate_teacher_disqualify(
 
     Sistem AI tidak pernah menggugurkan secara sepihak. Pengawas memberikan alasan dan catatan resmi.
     """
-    session = db.query(ExamSession).filter(ExamSession.id == request.session_id).first()
-    if not session:
-        raise AppException(
-            message="Sesi ujian tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="SESSION_NOT_FOUND",
-        )
+    # Isolation: only the exam's teacher, a tenant admin, or superadmin
+    # may adjudicate this session.
+    session = require_session(db, current_user, request.session_id)
 
     now = datetime.utcnow()
     session.status = "aborted"

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import get_current_active_user, require_student
+from app.core.tenant_scope import exam_accessible
 from app.models.user import User
 from app.models.exam import Exam, ExamQuestion
 from app.models.session import ExamSession, StudentAnswer, AutosaveSnapshot
@@ -71,6 +72,16 @@ def start_exam(
 ):
     exam = db.query(Exam).filter(Exam.id == exam_id).first()
     if not exam:
+        raise AppException(
+            message="Paket ujian tidak ditemukan.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            error_code="EXAM_NOT_FOUND",
+        )
+
+    # Enrollment isolation: a student may only start exams of classes they
+    # are enrolled in. Without this, any student could take (and read the
+    # questions of) any published exam in any school by guessing its id.
+    if not exam_accessible(db, current_user, exam):
         raise AppException(
             message="Paket ujian tidak ditemukan.",
             status_code=status.HTTP_404_NOT_FOUND,

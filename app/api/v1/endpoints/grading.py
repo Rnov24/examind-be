@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import require_teacher
+from app.core.tenant_scope import require_exam, require_session
 from app.core.timing import log_query_timing
 from app.models.user import User
 from app.models.exam import Exam, ExamQuestion
@@ -45,6 +46,9 @@ def list_exam_sessions_for_grading(
     current_user: User = Depends(require_teacher),
 ):
     with log_query_timing("list_exam_sessions_for_grading"):
+        # 404 when the exam belongs to another school or another teacher —
+        # the list exposes every student's name, identifier and scores.
+        require_exam(db, current_user, exam_id)
         query = (
             db.query(ExamSession)
             .filter(ExamSession.exam_id == exam_id)
@@ -119,13 +123,9 @@ def get_session_grading_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
-    session = db.query(ExamSession).filter(ExamSession.id == session_id).first()
-    if not session:
-        raise AppException(
-            message="Sesi tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="SESSION_NOT_FOUND",
-        )
+    # 404 when the session belongs to another school's student or another
+    # teacher's exam — the detail exposes full answers + AI rationales.
+    session = require_session(db, current_user, session_id)
 
     exam = (
         db.query(Exam)
@@ -214,6 +214,9 @@ def override_answer_score(
             status_code=status.HTTP_404_NOT_FOUND,
             error_code="ANSWER_NOT_FOUND",
         )
+    # A score override changes a student's grade: only the exam's teacher,
+    # a tenant admin, or superadmin may do it (404 otherwise).
+    require_session(db, current_user, ans.session_id)
 
     ans.teacher_override_score = request.teacher_override_score
     ans.final_score = request.teacher_override_score

@@ -186,7 +186,8 @@ class MockAIService(AIServiceInterface):
         return AIGenerateData(mcq_questions=mcqs, essay_questions=essays)
 
     def grade_essay(
-        self, prompt: str, rubric: Dict[str, Any], ideal_answer: str, student_answer: str
+        self, prompt: str, rubric: Dict[str, Any], ideal_answer: str, student_answer: str,
+        allocated_points: float = 10.0,
     ) -> Dict[str, Any]:
         """Evaluates student essay using respan/span-01-lite if available, or heuristic fallback."""
         try:
@@ -198,6 +199,7 @@ class MockAIService(AIServiceInterface):
                     rubric=rubric,
                     ideal_answer=ideal_answer,
                     student_answer=student_answer,
+                    allocated_points=allocated_points,
                 )
                 if res and "total_score" in res:
                     evals = res.get("rationale_json", {}).get("evaluations", [])

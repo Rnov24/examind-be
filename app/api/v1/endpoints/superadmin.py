@@ -431,7 +431,7 @@ def toggle_tenant_status(
 @router.get("/secrets", response_model=ApiResponse[List[SecretResponse]])
 def get_all_secrets(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_superadmin),
 ):
     """Retrieve all stored API secrets with masked values."""
     records = db.query(SystemSecret).order_by(SystemSecret.service_name.asc(), SystemSecret.key_name.asc()).all()
@@ -458,7 +458,7 @@ def get_all_secrets(
 def create_or_update_secret(
     request: SecretCreateOrUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_superadmin),
 ):
     """Create or update a secret API key with at-rest encryption."""
     clean_key = request.key_name.strip().upper()
@@ -513,7 +513,7 @@ def create_or_update_secret(
 def toggle_secret_status(
     key_name: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_superadmin),
 ):
     """Toggle active/inactive status of a secret."""
     clean_key = key_name.strip().upper()
@@ -548,7 +548,7 @@ def toggle_secret_status(
 def delete_secret(
     key_name: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_superadmin),
 ):
     """Delete a secret API key from the database."""
     clean_key = key_name.strip().upper()
@@ -569,7 +569,7 @@ def delete_secret(
 async def test_secret_connection(
     request: TestSecretRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_superadmin),
 ):
     """Perform live health check test against provider API using the specified secret."""
     service = request.service_name.strip().lower()
@@ -1205,7 +1205,7 @@ DEFAULT_AI_TASKS = [
 @router.get("/secrets/tasks")
 def get_task_secrets(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_superadmin),
 ):
     import json
     records = {r.key_name: r for r in db.query(SystemSecret).all()}
@@ -1253,7 +1253,7 @@ def get_task_secrets(
 def save_task_secret(
     payload: dict,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_superadmin),
 ):
     import json
     task_id = payload.get("task_id", "").strip().upper()

@@ -1,18 +1,91 @@
+"""Proctoring WebSockets — authenticated.
+
+Tenant isolation used to be absent here entirely: anyone who guessed an
+exam/session id could connect to the live monitor (student names, snapshots,
+violations), listen on a student's alert channel, or connect as a
+"companion" and inject fake violations into any session.
+
+- /ws/exam/{exam_id}/live-monitor and /ws/student/{session_id}/alerts now
+  require the caller's JWT as ?token= (the same access token the REST API
+  uses) and enforce the same exam/session access rules as the REST
+  endpoints (see app/core/tenant_scope.py). Connections that fail auth or
+  access are closed with 4401 / 4403.
+  FRONTEND FOLLOW-UP REQUIRED: the monitor page and the student exam
+  workspace must append ?token=<accessToken> to these two URLs
+  (fe: monitor page + src/stores/proctoringStore.ts initStudentWebSocket).
+  Until then, live monitoring will not connect.
+- /ws/proctoring/{session_id}/companion validates the pairing token
+  against the token persisted on the session (see ExamSession.pairing_token).
+  A wrong or missing token is rejected with 4403. Sessions created before
+  the pairing_token column existed (NULL) are accepted during the migration
+  window; all new sessions carry a token.
+"""
 import json
 from datetime import datetime
+from types import SimpleNamespace
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+
 from app.core.database import SessionLocal
+from app.core.exceptions import AppException
+from app.core.security import decode_access_token
+from app.core.tenant_scope import require_exam, require_session
 from app.models.session import ExamSession
 from app.models.proctoring import ProctoringLog
+from app.models.user import User
 from app.services.proctoring.websocket_hub import ws_hub
 from app.services.proctoring.storage import save_snapshot_base64
 from app.services.proctoring.integrity_calculator import calculate_session_integrity
 
 router = APIRouter(tags=["WebSockets"])
 
+WS_CLOSE_UNAUTHORIZED = 4401
+WS_CLOSE_FORBIDDEN = 4403
+WS_CLOSE_NOT_FOUND = 4404
+
+
+def _authenticate_ws(token: str | None):
+    """Resolve a JWT (?token=) to a light namespace with the fields the
+    tenant-scope helpers need, or None when missing/invalid/inactive."""
+    if not token:
+        return None
+    payload = decode_access_token(token)
+    if not payload or payload.get("sub") is None:
+        return None
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == int(payload["sub"])).first()
+        if not user or not user.is_active:
+            return None
+        return SimpleNamespace(id=user.id, role=user.role, tenant_id=user.tenant_id)
+    finally:
+        db.close()
+
+
+def _check_access(db, user, checker, *args):
+    """Run a tenant_scope require_* checker; returns True when allowed."""
+    try:
+        checker(db, user, *args)
+        return True
+    except AppException:
+        return False
+
 
 @router.websocket("/ws/exam/{exam_id}/live-monitor")
-async def ws_live_monitor(websocket: WebSocket, exam_id: int):
+async def ws_live_monitor(websocket: WebSocket, exam_id: int, token: str = Query(None)):
+    user = _authenticate_ws(token)
+    if user is None:
+        await websocket.close(code=WS_CLOSE_UNAUTHORIZED)
+        return
+    db = SessionLocal()
+    try:
+        allowed = _check_access(db, user, require_exam, exam_id)
+    finally:
+        db.close()
+    if not allowed:
+        await websocket.close(code=WS_CLOSE_FORBIDDEN)
+        return
+
     await ws_hub.connect_monitor(exam_id, websocket)
     try:
         while True:
@@ -25,7 +98,20 @@ async def ws_live_monitor(websocket: WebSocket, exam_id: int):
 
 
 @router.websocket("/ws/student/{session_id}/alerts")
-async def ws_student_alerts(websocket: WebSocket, session_id: int):
+async def ws_student_alerts(websocket: WebSocket, session_id: int, token: str = Query(None)):
+    user = _authenticate_ws(token)
+    if user is None:
+        await websocket.close(code=WS_CLOSE_UNAUTHORIZED)
+        return
+    db = SessionLocal()
+    try:
+        allowed = _check_access(db, user, require_session, session_id)
+    finally:
+        db.close()
+    if not allowed:
+        await websocket.close(code=WS_CLOSE_FORBIDDEN)
+        return
+
     await ws_hub.connect_student(session_id, websocket)
     try:
         while True:
@@ -38,13 +124,28 @@ async def ws_student_alerts(websocket: WebSocket, session_id: int):
 
 @router.websocket("/ws/proctoring/{session_id}/companion")
 async def ws_companion(websocket: WebSocket, session_id: int, token: str = Query(None)):
-    await ws_hub.connect_companion(session_id, websocket)
-
-    # Resolve exam_id and student details
+    # Validate the pairing token BEFORE accepting: the companion camera is
+    # allowed to inject violation events that change a student's integrity
+    # score, so an unchecked connection could tank any student's score.
     db = SessionLocal()
     session = db.query(ExamSession).filter(ExamSession.id == session_id).first()
-    exam_id = session.exam_id if session else None
-    student_name = session.student.full_name if session and session.student else "Siswa"
+    if not session:
+        db.close()
+        await websocket.close(code=WS_CLOSE_NOT_FOUND)
+        return
+    stored_token = session.pairing_token
+    exam_id = session.exam_id
+    student_name = session.student.full_name if session.student else "Siswa"
+    db.close()
+    if stored_token and token != stored_token:
+        await websocket.close(code=WS_CLOSE_FORBIDDEN)
+        return
+
+    await ws_hub.connect_companion(session_id, websocket)
+
+    # Mark the session as companion-paired
+    db = SessionLocal()
+    session = db.query(ExamSession).filter(ExamSession.id == session_id).first()
     if session:
         session.companion_paired = True
         db.commit()

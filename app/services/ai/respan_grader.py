@@ -116,23 +116,53 @@ class RespanDecisionGrader:
         if isinstance(rubric, dict) and "ref_points" in rubric and isinstance(rubric["ref_points"], list):
             ref_points = rubric["ref_points"]
         elif isinstance(rubric, dict) and any(k.startswith("dimension_") for k in rubric.keys()):
-            # Adapt legacy 4D rubric
-            idx = 1
+            # Adapt legacy 4D rubric — HONORING the rubric's own weights.
+            # The canonical 4D scheme is Concept 40 / Argument 30 / Terminology 15 /
+            # Clarity 15 (see rubric_generator.generate_4d_rubric). The old code
+            # hardcoded 0.25 per dimension, silently discarding those weights.
+            # A dimension value may be a dict {"max": 40, "weight_pct": 40,
+            # "criteria": "..."} or a bare number (treated as a weight, e.g.
+            # the generator's {"dimension_1_concept": 50, ...} example).
+            dim_entries = []
             for k, v in rubric.items():
-                crit_text = v.get("criteria", "") if isinstance(v, dict) else str(v)
-                if crit_text:
-                    label = k.replace("dimension_", "").replace("_", " ").title()
-                    ref_points.append({
-                        "id": f"dim_{idx}",
-                        "statement": f"{label}: {crit_text}",
-                        "weight": 0.25,
-                        "instructions": f"Apakah jawaban siswa memenuhi dimensi {label}?",
-                        "criteria": {
-                            "true": f"Memenuhi kriteria: {crit_text}",
-                            "false": f"Gagal memenuhi kriteria: {crit_text}",
-                        },
-                    })
-                    idx += 1
+                if not k.startswith("dimension_"):
+                    continue
+                if isinstance(v, dict):
+                    crit_text = v.get("criteria", "") or ""
+                    w = v.get("weight_pct", v.get("max"))
+                else:
+                    crit_text = str(v)
+                    w = v
+                try:
+                    w = float(w)
+                except (TypeError, ValueError):
+                    w = 0.0
+                dim_entries.append((k, crit_text, w))
+
+            total_w = sum(w for _, _, w in dim_entries) or 0.0
+            idx = 1
+            for k, crit_text, w in dim_entries:
+                # Skip entries with no real criteria text. A bare number
+                # (e.g. "50") is a weight, not a criterion — asking the
+                # decision model whether the answer "contains the concept 50"
+                # is nonsense, so such entries are dropped and the caller
+                # falls back to ideal-answer parsing if nothing survives.
+                if not crit_text or crit_text.strip().replace(".", "").isdigit():
+                    continue
+                label = k.replace("dimension_", "").replace("_", " ").title()
+                # "dimension_1_concept" -> "Concept" (drop the index number).
+                label = " ".join(p for p in label.split() if not p.isdigit())
+                ref_points.append({
+                    "id": f"dim_{idx}",
+                    "statement": f"{label}: {crit_text}",
+                    "weight": round(w / total_w, 3) if total_w > 0 else 0.25,
+                    "instructions": f"Apakah jawaban siswa memenuhi dimensi {label}?",
+                    "criteria": {
+                        "true": f"Memenuhi kriteria: {crit_text}",
+                        "false": f"Gagal memenuhi kriteria: {crit_text}",
+                    },
+                })
+                idx += 1
 
         # Fallback to parsing ideal_answer if ref_points is empty
         if not ref_points:

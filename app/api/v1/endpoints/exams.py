@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import get_current_active_user, require_teacher
+from app.core.tenant_scope import bank_accessible, is_superadmin, require_class, require_exam
 from app.core.timing import log_query_timing
 from app.models.user import User
 from app.models.academic import Class, ClassMember
@@ -61,7 +62,15 @@ def list_exams(
 ):
     with log_query_timing("list_exams"):
         if current_user.role == "admin":
-            query = db.query(Exam)
+            # Tenant isolation: only exams owned by teachers of this school.
+            # (require_teacher includes admin; superadmin sees everything.)
+            if is_superadmin(current_user):
+                query = db.query(Exam)
+            else:
+                teacher_ids = db.query(User.id).filter(
+                    User.tenant_id == current_user.tenant_id, User.role == "teacher"
+                )
+                query = db.query(Exam).filter(Exam.teacher_id.in_(teacher_ids))
         elif current_user.role == "teacher":
             query = db.query(Exam).filter(Exam.teacher_id == current_user.id)
         else:  # student
@@ -113,13 +122,9 @@ def create_exam(
             error_code="INVALID_TIME_RANGE",
         )
 
-    cls = db.query(Class).filter(Class.id == request.class_id).first()
-    if not cls:
-        raise AppException(
-            message="Kelas target tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="CLASS_NOT_FOUND",
-        )
+    # The target class must be one the caller may write exams for: owned by
+    # the teacher, in the admin's school, or any class for superadmin.
+    cls = require_class(db, current_user, request.class_id, write=True)
 
     exam = Exam(
         teacher_id=current_user.id,
@@ -164,18 +169,16 @@ def get_exam_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
+    # 404 when the exam does not exist OR the caller may not see it
+    # (other school, another teacher's exam, or a class the student
+    # is not enrolled in). Students still get answers stripped below.
+    exam = require_exam(db, current_user, exam_id)
     exam = (
         db.query(Exam)
         .options(selectinload(Exam.exam_questions).selectinload(ExamQuestion.question))
-        .filter(Exam.id == exam_id)
+        .filter(Exam.id == exam.id)
         .first()
     )
-    if not exam:
-        raise AppException(
-            message="Paket ujian tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="EXAM_NOT_FOUND",
-        )
 
     eq_list = []
     total_pts = 0.0
@@ -216,19 +219,19 @@ def update_exam(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
-    exam = db.query(Exam).filter(Exam.id == exam_id).first()
-    if not exam:
-        raise AppException(
-            message="Paket ujian tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="EXAM_NOT_FOUND",
-        )
+    # Write access: exam owner, tenant admin, or superadmin — 404 otherwise
+    # (a teacher may no longer edit another teacher's exam, even in the
+    # same school).
+    exam = require_exam(db, current_user, exam_id)
 
     if request.title is not None:
         exam.title = request.title
     if request.description is not None:
         exam.description = request.description
     if request.class_id is not None:
+        # Moving an exam to another class is only allowed within the
+        # caller's own scope — never into another school's class.
+        require_class(db, current_user, request.class_id, write=True)
         exam.class_id = request.class_id
     if request.duration_minutes is not None:
         exam.duration_minutes = request.duration_minutes
@@ -280,13 +283,7 @@ def publish_exam(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
-    exam = db.query(Exam).filter(Exam.id == exam_id).first()
-    if not exam:
-        raise AppException(
-            message="Paket ujian tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="EXAM_NOT_FOUND",
-        )
+    exam = require_exam(db, current_user, exam_id)
 
     if not exam.exam_questions:
         raise AppException(
@@ -310,13 +307,7 @@ def add_question_to_exam(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
-    exam = db.query(Exam).filter(Exam.id == exam_id).first()
-    if not exam:
-        raise AppException(
-            message="Paket ujian tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="EXAM_NOT_FOUND",
-        )
+    exam = require_exam(db, current_user, exam_id)
 
     question = db.query(Question).filter(Question.id == request.question_id).first()
     if not question:
@@ -325,6 +316,16 @@ def add_question_to_exam(
             status_code=status.HTTP_404_NOT_FOUND,
             error_code="QUESTION_NOT_FOUND",
         )
+    # The question must come from a bank the caller may use — otherwise a
+    # teacher could attach (and read answers of) another school's questions.
+    if not is_superadmin(current_user):
+        bank = question.bank
+        if bank is None or not bank_accessible(db, current_user, bank):
+            raise AppException(
+                message="Butir soal tidak ditemukan.",
+                status_code=status.HTTP_404_NOT_FOUND,
+                error_code="QUESTION_NOT_FOUND",
+            )
 
     existing = (
         db.query(ExamQuestion)
@@ -367,6 +368,8 @@ def remove_question_from_exam(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
+    # Write access on the exam (owner / tenant admin / superadmin).
+    require_exam(db, current_user, exam_id)
     eq = (
         db.query(ExamQuestion)
         .filter(ExamQuestion.exam_id == exam_id, ExamQuestion.question_id == question_id)

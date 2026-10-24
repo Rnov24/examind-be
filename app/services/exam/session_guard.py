@@ -61,10 +61,17 @@ def get_or_create_exam_session(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 error_code="EXAM_ALREADY_SUBMITTED",
             )
-        token = generate_pairing_token(existing.id)
+        # Reuse the persisted pairing token so the QR shown earlier in the
+        # session stays valid; legacy sessions without one get one minted.
+        token = existing.pairing_token or generate_pairing_token(existing.id)
+        if not existing.pairing_token:
+            existing.pairing_token = token
+            db.commit()
         return existing, False, token
 
-    # Create new session
+    # Create new session: mint and PERSIST the pairing token so the
+    # companion WebSocket can validate it later.
+    token = generate_pairing_token(0)
     session = ExamSession(
         exam_id=exam.id,
         student_id=student_id,
@@ -73,6 +80,7 @@ def get_or_create_exam_session(
         total_score=0.00,
         integrity_score=100,
         companion_paired=False,
+        pairing_token=token,
         client_ip=client_ip,
         user_agent=user_agent,
     )
@@ -80,5 +88,4 @@ def get_or_create_exam_session(
     db.commit()
     db.refresh(session)
 
-    token = generate_pairing_token(session.id)
     return session, True, token

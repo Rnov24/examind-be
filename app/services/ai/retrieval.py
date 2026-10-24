@@ -712,8 +712,24 @@ def build_question_explanation_context(
             .first()
         )
     else:
-        # Teacher or Admin viewing
-        pass
+        # Teacher or Admin viewing: they may only see answer keys for
+        # exams they own (teacher) or exams of their school (admin).
+        # Without this, any teacher/admin could pull another school's
+        # answer keys + rubrics through the tutor chat.
+        if user.role == "teacher" and exam.teacher_id != user.id:
+            raise AppException(
+                message="Ujian tidak ditemukan.",
+                status_code=status.HTTP_404_NOT_FOUND,
+                error_code="EXAM_NOT_FOUND",
+            )
+        if user.role == "admin" and user.tenant_id is not None:
+            teacher = db.query(User).filter(User.id == exam.teacher_id).first()
+            if teacher is None or teacher.tenant_id != user.tenant_id:
+                raise AppException(
+                    message="Ujian tidak ditemukan.",
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    error_code="EXAM_NOT_FOUND",
+                )
 
     allocated_points = float(exam_question.allocated_points or 10.0)
     score_obtained = float(student_answer.final_score or 0.0) if student_answer else 0.0

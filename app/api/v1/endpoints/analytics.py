@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import require_teacher
+from app.core.tenant_scope import require_exam
 from app.models.user import User
 from app.models.exam import Exam
 from app.schemas.common import ApiResponse
@@ -20,13 +21,9 @@ def get_exam_item_analysis(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
-    exam = db.query(Exam).filter(Exam.id == exam_id).first()
-    if not exam:
-        raise AppException(
-            message="Paket ujian tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="EXAM_NOT_FOUND",
-        )
+    # 404 when the exam belongs to another school or another teacher —
+    # item analysis and both exports expose every student's scores.
+    exam = require_exam(db, current_user, exam_id)
 
     analytics_data = compute_exam_analytics(db, exam_id)
     return ApiResponse.ok(data=analytics_data, message="Analisis butir soal dan statistik kelas berhasil dihitung")
@@ -38,13 +35,9 @@ def export_gradebook_excel(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
-    exam = db.query(Exam).filter(Exam.id == exam_id).first()
-    if not exam:
-        raise AppException(
-            message="Paket ujian tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="EXAM_NOT_FOUND",
-        )
+    # 404 when the exam belongs to another school or another teacher —
+    # item analysis and both exports expose every student's scores.
+    exam = require_exam(db, current_user, exam_id)
 
     excel_buffer = generate_excel_gradebook(db, exam_id)
     filename = f"rekap_nilai_exam_{exam_id}.xlsx"
@@ -61,13 +54,9 @@ def export_berita_acara_pdf(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_teacher),
 ):
-    exam = db.query(Exam).filter(Exam.id == exam_id).first()
-    if not exam:
-        raise AppException(
-            message="Paket ujian tidak ditemukan.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="EXAM_NOT_FOUND",
-        )
+    # 404 when the exam belongs to another school or another teacher —
+    # item analysis and both exports expose every student's scores.
+    exam = require_exam(db, current_user, exam_id)
 
     pdf_buffer = generate_pdf_berita_acara(db, exam_id)
     filename = f"berita_acara_exam_{exam_id}.pdf"
