@@ -23,6 +23,33 @@ from app.schemas.common import ApiResponse, PaginatedResponse
 
 router = APIRouter(prefix="/exams", tags=["Exam Management & Publishing"])
 
+EXAM_MODES = ("live", "non_live")
+
+
+def _validate_exam_mode(mode: Optional[str]) -> None:
+    if mode is not None and mode not in EXAM_MODES:
+        raise AppException(
+            message="Mode ujian tidak valid. Pilih 'live' (serentak) atau 'non_live' (mandiri).",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_EXAM_MODE",
+        )
+
+
+def _validate_non_live_window(start_time, end_time, duration_minutes: int) -> None:
+    """A non-live exam must be finishable inside its window: a student
+    starting at the very opening still needs `duration_minutes` before
+    end_time, otherwise the window can never be completed."""
+    window_minutes = (end_time - start_time).total_seconds() / 60
+    if duration_minutes > window_minutes:
+        raise AppException(
+            message=(
+                "Durasi ujian mandiri tidak boleh melebihi panjang jendela "
+                f"pengerjaan ({int(window_minutes)} menit)."
+            ),
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_NON_LIVE_WINDOW",
+        )
+
 
 def build_exam_response(
     exam: Exam,
@@ -44,6 +71,7 @@ def build_exam_response(
         randomize_options=exam.randomize_options,
         proctoring_level=exam.proctoring_level,
         explanation_policy=exam.explanation_policy,
+        exam_mode=exam.exam_mode or "live",
         status=exam.status,
         created_at=exam.created_at,
         questions_count=len(exam.exam_questions),
@@ -121,6 +149,9 @@ def create_exam(
             status_code=status.HTTP_400_BAD_REQUEST,
             error_code="INVALID_TIME_RANGE",
         )
+    _validate_exam_mode(request.exam_mode)
+    if request.exam_mode == "non_live":
+        _validate_non_live_window(request.start_time, request.end_time, request.duration_minutes)
 
     # The target class must be one the caller may write exams for: owned by
     # the teacher, in the admin's school, or any class for superadmin.
@@ -138,6 +169,7 @@ def create_exam(
         randomize_options=request.randomize_options,
         proctoring_level=request.proctoring_level,
         explanation_policy=request.explanation_policy,
+        exam_mode=request.exam_mode or "live",
         status="draft",
     )
     db.add(exam)
@@ -247,8 +279,21 @@ def update_exam(
         exam.proctoring_level = request.proctoring_level
     if request.explanation_policy is not None:
         exam.explanation_policy = request.explanation_policy
+    if request.exam_mode is not None:
+        _validate_exam_mode(request.exam_mode)
+        exam.exam_mode = request.exam_mode
     if request.status is not None:
         exam.status = request.status
+
+    # Re-validate the effective window after applying the changes.
+    if exam.end_time <= exam.start_time:
+        raise AppException(
+            message="Waktu berakhir ujian (end_time) harus lebih besar dari waktu mulai (start_time).",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="INVALID_TIME_RANGE",
+        )
+    if (exam.exam_mode or "live") == "non_live":
+        _validate_non_live_window(exam.start_time, exam.end_time, exam.duration_minutes)
 
     db.commit()
     db.refresh(exam)
@@ -267,6 +312,7 @@ def update_exam(
         randomize_options=exam.randomize_options,
         proctoring_level=exam.proctoring_level,
         explanation_policy=exam.explanation_policy,
+        exam_mode=exam.exam_mode or "live",
         status=exam.status,
         created_at=exam.created_at,
         questions_count=len(exam.exam_questions),

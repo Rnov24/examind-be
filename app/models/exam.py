@@ -21,6 +21,15 @@ class Exam(Base):
         Enum("disabled", "single_camera", "dual_camera", name="proctoring_levels"),
         default="dual_camera",
     )
+    # 'live': all students start simultaneously at start_time, shared clock.
+    # 'non_live': each student starts independently any time inside the
+    # [start_time, end_time] window; their personal clock runs
+    # duration_minutes from their own begun_at, hard-capped at end_time.
+    exam_mode = Column(
+        Enum("live", "non_live", name="exam_modes"),
+        default="live",
+        nullable=False,
+    )
     explanation_policy = Column(
         Enum("instant", "after_exam_closed", name="explanation_policies"),
         default="after_exam_closed",

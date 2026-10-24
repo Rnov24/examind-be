@@ -21,6 +21,7 @@ class ExamBase(BaseModel):
     randomize_options: bool = True
     proctoring_level: str = "dual_camera"  # disabled, single_camera, dual_camera
     explanation_policy: str = "after_exam_closed"  # instant, after_exam_closed
+    exam_mode: str = "live"  # live | non_live
 
 
 class ExamCreate(ExamBase):
@@ -38,6 +39,7 @@ class ExamUpdate(BaseModel):
     randomize_options: Optional[bool] = None
     proctoring_level: Optional[str] = None
     explanation_policy: Optional[str] = None
+    exam_mode: Optional[str] = None  # live | non_live
     status: Optional[str] = None
 
 

@@ -34,19 +34,45 @@ def get_or_create_exam_session(
             error_code="EXAM_NOT_ACTIVE",
         )
 
-    # Note: In dev/test environments we allow flexible timestamps if needed
-    if now < exam.start_time and exam.status != "published":
-        raise AppException(
-            message=f"Ujian belum dibuka. Jadwal mulai: {exam.start_time.strftime('%Y-%m-%d %H:%M:%S')}",
-            status_code=status.HTTP_400_BAD_REQUEST,
-            error_code="EXAM_NOT_STARTED",
-        )
-
+    # Mode-aware window gating. Applies to NEW sessions only — a student
+    # resuming an existing session is never locked out by a moved window.
+    mode = getattr(exam, "exam_mode", None) or "live"
     existing = (
         db.query(ExamSession)
         .filter(ExamSession.exam_id == exam.id, ExamSession.student_id == student_id)
         .first()
     )
+    if existing is None:
+        if now < exam.start_time:
+            # Neither mode may start before the window opens. Live adds the
+            # simultaneous-start rule (everyone at the same fixed time).
+            if mode == "live":
+                raise AppException(
+                    message=(
+                        "Ujian live belum dimulai. Semua siswa mulai serentak pada "
+                        f"{exam.start_time.strftime('%d %b %Y %H:%M')} WIB."
+                    ),
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    error_code="EXAM_NOT_STARTED",
+                )
+            raise AppException(
+                message=(
+                    "Jendela pengerjaan belum dibuka. Ujian mandiri ini bisa "
+                    f"dikerjakan mulai {exam.start_time.strftime('%d %b %Y %H:%M')} WIB."
+                ),
+                status_code=status.HTTP_400_BAD_REQUEST,
+                error_code="EXAM_NOT_STARTED",
+            )
+        if now > exam.end_time:
+            # Both modes: no new session after the window closes.
+            raise AppException(
+                message=(
+                    "Jendela pengerjaan ujian sudah ditutup "
+                    f"({exam.end_time.strftime('%d %b %Y %H:%M')} WIB)."
+                ),
+                status_code=status.HTTP_400_BAD_REQUEST,
+                error_code="EXAM_ENDED",
+            )
 
     if existing:
         if existing.status == "aborted":

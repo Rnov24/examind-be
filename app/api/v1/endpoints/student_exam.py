@@ -36,6 +36,26 @@ from app.services.reporting.pdf_exporter import generate_pdf_student_result
 router = APIRouter(prefix="/student", tags=["Student Exam Flow"])
 
 
+def _remaining_seconds(exam: Exam, session: Optional[ExamSession]) -> int:
+    """Seconds left for a student.
+
+    Base clock: duration_minutes counted from the student's own begun_at
+    (set when they finish the camera wizard and actually start answering);
+    before begun_at, no time is consumed. Hard cap: end_time is an absolute
+    deadline for BOTH modes — a live student who begins late gets no extra
+    time past end_time, and a non-live student running into the window close
+    is cut off at end_time.
+    """
+    now = datetime.utcnow()
+    if session is not None and session.begun_at:
+        elapsed = int((now - session.begun_at).total_seconds())
+        remaining = exam.duration_minutes * 60 - elapsed
+    else:
+        remaining = exam.duration_minutes * 60
+    until_end = int((exam.end_time - now).total_seconds())
+    return max(0, min(remaining, until_end))
+
+
 @router.get("/exams/active", response_model=ApiResponse[List[ExamResponse]])
 def get_student_active_exams(
     db: Session = Depends(get_db),
@@ -125,12 +145,9 @@ def start_exam(
     )
 
     # Calculate remaining seconds — the clock runs from begun_at when the
-    # student has finished the setup wizard; before that, no time is consumed.
-    if session.begun_at:
-        elapsed_seconds = int((datetime.utcnow() - session.begun_at).total_seconds())
-        remaining_seconds = max(0, exam.duration_minutes * 60 - elapsed_seconds)
-    else:
-        remaining_seconds = exam.duration_minutes * 60
+    # student has finished the setup wizard; before that, no time is
+    # consumed. end_time is a hard cap for both live and non-live exams.
+    remaining_seconds = _remaining_seconds(exam, session)
 
     # Load any previously autosaved answers for resume
     cached_answers = {}
@@ -153,6 +170,7 @@ def start_exam(
             "start_time": exam.start_time.isoformat(),
             "end_time": exam.end_time.isoformat(),
             "proctoring_level": exam.proctoring_level,
+            "exam_mode": getattr(exam, "exam_mode", None) or "live",
             "total_questions": len(shuffled_questions),
         },
         pairing_token=pairing_token,
@@ -201,8 +219,7 @@ def begin_exam(
         session.begun_at = datetime.utcnow()
         db.commit()
         db.refresh(session)
-    elapsed = int((datetime.utcnow() - session.begun_at).total_seconds())
-    remaining = max(0, exam.duration_minutes * 60 - elapsed)
+    remaining = _remaining_seconds(exam, session)
     return ApiResponse.ok(
         data={
             "begun_at": session.begun_at.isoformat(),
