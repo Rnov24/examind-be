@@ -113,6 +113,21 @@ async def ws_student_alerts(websocket: WebSocket, session_id: int, token: str = 
         return
 
     await ws_hub.connect_student(session_id, websocket)
+    # Replay the current pairing state to a (re)connecting desktop. Without
+    # this, a desktop that subscribes AFTER the phone paired never hears
+    # COMPANION_PAIRED_SUCCESS (it was broadcast to zero subscribers) and its
+    # wizard stays on "Menunggu pindai…" even though the phone is connected.
+    db = SessionLocal()
+    try:
+        session_rec = db.query(ExamSession).filter(ExamSession.id == session_id).first()
+        already_paired = bool(session_rec and session_rec.companion_paired)
+    finally:
+        db.close()
+    if already_paired:
+        await ws_hub.send_to_student(session_id, {
+            "event": "COMPANION_PAIRED_SUCCESS",
+            "payload": {"session_id": session_id, "status": "connected"},
+        })
     try:
         while True:
             data = await websocket.receive_text()
