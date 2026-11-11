@@ -4,7 +4,16 @@ from fastapi import WebSocket
 
 
 class WebSocketHub:
-    """Manages real-time WebSocket connections across live monitoring, companion pairing, and student alerts."""
+    """Manages real-time WebSocket connections across live monitoring, companion pairing, and student alerts.
+
+    NOTE: this hub is in-memory per container. If the backend ever runs
+    more than one container (Modal may scale it), a broadcast from the
+    companion's container will not reach a desktop connected to a different
+    container. Do NOT build Redis pub/sub for this yet: the DB-backed
+    companion_paired flag plus the replay in ws_student_alerts and the
+    REST pairing-status poll cover the gap — a (re)connecting desktop
+    re-reads the pairing state instead of depending on a live broadcast.
+    """
 
     def __init__(self):
         # exam_id -> list of teacher websockets

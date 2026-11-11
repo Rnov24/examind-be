@@ -192,8 +192,18 @@ async def ws_companion(websocket: WebSocket, session_id: int, token: str = Query
 
             msg_type = msg.get("type") or msg.get("event")
 
+            # 0. Connectivity ping from the companion client ("Kirim Ping"
+            # button): proves the phone-to-server leg works. Answered here
+            # and never forwarded anywhere.
+            if msg_type == "ping":
+                await websocket.send_text(json.dumps({
+                    "event": "pong",
+                    "sent_at": msg.get("sent_at"),
+                    "server_time": datetime.utcnow().isoformat(),
+                }))
+
             # 1. Edge CV snapshot preview frame for teacher monitor
-            if msg_type == "COMPANION_FRAME" and exam_id:
+            elif msg_type == "COMPANION_FRAME" and exam_id:
                 frame_data = msg.get("frame") or msg.get("snapshot_url")
                 metrics = msg.get("metrics", {})
                 await ws_hub.broadcast_to_exam(exam_id, {

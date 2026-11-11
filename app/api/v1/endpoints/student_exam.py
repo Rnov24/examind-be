@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.database import get_db
 from app.core.exceptions import AppException
 from app.core.dependencies import get_current_active_user, require_student
-from app.core.tenant_scope import exam_accessible
+from app.core.tenant_scope import exam_accessible, require_session
 from app.models.user import User
 from app.models.exam import Exam, ExamQuestion
 from app.models.session import ExamSession, StudentAnswer, AutosaveSnapshot
@@ -180,6 +180,31 @@ def start_exam(
         begun_at=session.begun_at,
     )
     return ApiResponse.ok(data=res, message="Sesi ujian dimulai")
+
+
+@router.get("/exam/{session_id}/pairing-status")
+def get_pairing_status(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_student),
+):
+    """Read-only pairing state for the desktop wizard's REST fallback.
+
+    The wizard normally learns about pairing from the student WS
+    (COMPANION_PAIRED_SUCCESS), but when that socket is dead the wizard
+    would otherwise sit on "Menunggu pindai…" forever. Polling this
+    endpoint every few seconds while on the kamera2 step un-sticks it.
+    require_session returns 404 for another tenant's session, so no
+    cross-tenant pairing state ever leaks.
+    """
+    session = require_session(db, current_user, session_id)
+    return ApiResponse.ok(
+        data={
+            "session_id": session.id,
+            "companion_paired": bool(session.companion_paired),
+        },
+        message="Status pairing kamera kedua berhasil dimuat",
+    )
 
 
 @router.post("/exam/{exam_id}/begin")

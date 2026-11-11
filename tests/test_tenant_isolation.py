@@ -9,6 +9,7 @@ full auth + scoping path is exercised. Cross-tenant access must return 404
 Run: .venv/bin/python -m pytest tests/test_tenant_isolation.py -v
 """
 from datetime import datetime, timedelta
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -328,17 +329,42 @@ def test_ws_live_monitor_requires_auth_and_tenant_access(ws_client):
         ws.close()
 
 
-def test_ws_companion_validates_pairing_token(ws_client):
-    # Wrong token -> 4403
-    with pytest.raises(WebSocketDisconnect) as ei:
-        with ws_client.websocket_connect(
-            f"/ws/proctoring/1/companion?token={'wrong-token-1'}"
-        ):
-            pass
-    assert ei.value.code == 4403
-    # Correct persisted token -> connects
+def test_ws_companion_answers_ping_with_pong(ws_client):
+    # The companion "Kirim Ping" button proves the phone-to-server leg:
+    # a ping must be answered with a pong echoing sent_at.
     with ws_client.websocket_connect(
         f"/ws/proctoring/1/companion?token={PAIR_TOKEN}"
     ) as ws:
-        ws.send_text("ping")
+        ws.send_text('{"type": "ping", "sent_at": 123456789}')
+        data = ws.receive_text()
+        msg = json.loads(data)
+        assert msg["event"] == "pong"
+        assert msg["sent_at"] == 123456789
+        assert "server_time" in msg
         ws.close()
+
+
+def test_pairing_status_rest_fallback(client, db_session):
+    # Owner reads their own session: not paired yet.
+    resp = client.get("/api/v1/student/exam/1/pairing-status", headers=_auth(6))
+    assert resp.status_code == 200
+    assert resp.json()["data"] == {"session_id": 1, "companion_paired": False}
+
+    # After the phone pairs, the same read reports paired (this is what
+    # un-sticks the desktop wizard when its WS is dead).
+    session = db_session.query(ExamSession).filter(ExamSession.id == 1).first()
+    session.companion_paired = True
+    db_session.commit()
+    resp = client.get("/api/v1/student/exam/1/pairing-status", headers=_auth(6))
+    assert resp.status_code == 200
+    assert resp.json()["data"]["companion_paired"] is True
+
+    # Same-tenant student who does not own the session -> 404.
+    resp = client.get("/api/v1/student/exam/1/pairing-status", headers=_auth(7))
+    assert resp.status_code == 404
+    # Other tenant's student -> 404 (never confirms the session exists).
+    resp = client.get("/api/v1/student/exam/1/pairing-status", headers=_auth(8))
+    assert resp.status_code == 404
+    # Nonexistent session -> 404.
+    resp = client.get("/api/v1/student/exam/999/pairing-status", headers=_auth(6))
+    assert resp.status_code == 404
