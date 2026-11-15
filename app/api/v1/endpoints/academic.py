@@ -1,5 +1,6 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.database import get_db
 from app.core.exceptions import AppException
@@ -8,6 +9,7 @@ from app.core.tenant_scope import is_superadmin, require_class
 from app.core.timing import log_query_timing
 from app.models.user import User
 from app.models.academic import Class, ClassMember
+from app.models.exam import Exam
 from app.schemas.academic import (
     ClassCreate,
     ClassUpdate,
@@ -217,8 +219,48 @@ def delete_class(
     # Write access: class owner, tenant admin, or superadmin — 404 otherwise.
     cls = require_class(db, current_user, class_id, write=True)
 
-    db.delete(cls)
-    db.commit()
+    # Refuse-with-409 (never cascade, never silently empty the class):
+    # deleting a class that still has exams used to 500 — Class.exams has
+    # no delete cascade, so SQLAlchemy nulled Exam.class_id on flush and
+    # the NOT NULL column rejected it ("Column 'class_id' cannot be null",
+    # with the raw UPDATE statement leaking into the 500 body via the
+    # global exception handler's str(exc)). Members cascade cleanly in the
+    # ORM, but dropping them here would silently unenrol students, so a
+    # class is only deletable when it has no exams and no members at all.
+    # Callers must delete/move the exams and remove the members first.
+    exam_count = db.query(Exam).filter(Exam.class_id == class_id).count()
+    if exam_count:
+        raise AppException(
+            message=(
+                "Kelas tidak dapat dihapus karena masih memiliki "
+                f"{exam_count} paket ujian. Hapus atau pindahkan dulu paket ujiannya."
+            ),
+            status_code=status.HTTP_409_CONFLICT,
+            error_code="CLASS_HAS_EXAMS",
+        )
+    member_count = db.query(ClassMember).filter(ClassMember.class_id == class_id).count()
+    if member_count:
+        raise AppException(
+            message=(
+                "Kelas tidak dapat dihapus karena masih memiliki "
+                f"{member_count} anggota. Keluarkan dulu semua anggota dari kelas."
+            ),
+            status_code=status.HTTP_409_CONFLICT,
+            error_code="CLASS_HAS_MEMBERS",
+        )
+
+    try:
+        db.delete(cls)
+        db.commit()
+    except IntegrityError:
+        # Race safety net: a reference created between the checks and the
+        # commit must surface as a clean 409, never a 500 with SQL text.
+        db.rollback()
+        raise AppException(
+            message="Kelas tidak dapat dihapus karena masih digunakan oleh data lain.",
+            status_code=status.HTTP_409_CONFLICT,
+            error_code="CLASS_IN_USE",
+        )
     return ApiResponse.ok(data={"deleted_id": class_id}, message="Kelas berhasil dihapus")
 
 

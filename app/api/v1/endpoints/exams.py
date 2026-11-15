@@ -1,5 +1,6 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.database import get_db
 from app.core.exceptions import AppException
@@ -10,6 +11,7 @@ from app.models.user import User
 from app.models.academic import Class, ClassMember
 from app.models.exam import Exam, ExamQuestion
 from app.models.question import Question
+from app.models.session import ExamSession, StudentAnswer
 from app.schemas.exam import (
     ExamCreate,
     ExamUpdate,
@@ -90,15 +92,19 @@ def list_exams(
 ):
     with log_query_timing("list_exams"):
         if current_user.role == "admin":
-            # Tenant isolation: only exams owned by teachers of this school.
-            # (require_teacher includes admin; superadmin sees everything.)
+            # Tenant isolation: exams created by any user of this school.
+            # (require_teacher includes admin, so admins can create exams;
+            # filtering creators by role == "teacher" hid admin-created
+            # exams from the list. This matches exam_accessible in
+            # tenant_scope.py, which scopes admin access by the creator's
+            # tenant regardless of role. Superadmin sees everything.)
             if is_superadmin(current_user):
                 query = db.query(Exam)
             else:
-                teacher_ids = db.query(User.id).filter(
-                    User.tenant_id == current_user.tenant_id, User.role == "teacher"
+                creator_ids = db.query(User.id).filter(
+                    User.tenant_id == current_user.tenant_id
                 )
-                query = db.query(Exam).filter(Exam.teacher_id.in_(teacher_ids))
+                query = db.query(Exam).filter(Exam.teacher_id.in_(creator_ids))
         elif current_user.role == "teacher":
             query = db.query(Exam).filter(Exam.teacher_id == current_user.id)
         else:  # student
@@ -321,6 +327,61 @@ def update_exam(
         class_name=exam.class_.name if exam.class_ else None,
     )
     return ApiResponse.ok(data=res, message="Paket ujian berhasil diperbarui")
+
+
+@router.delete("/{exam_id}", response_model=ApiResponse[dict])
+def delete_exam(
+    exam_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_teacher),
+):
+    # Write access: exam owner, tenant admin, or superadmin — 404 otherwise
+    # (same ownership rules as update_exam via require_exam).
+    exam = require_exam(db, current_user, exam_id)
+
+    # Never delete under live history: an exam with sessions or answers is
+    # part of the grading record. Refuse with 409 instead of cascading —
+    # the ORM cascade on Exam.sessions would otherwise wipe sessions,
+    # answers, autosaves and proctoring logs with the exam.
+    session_count = db.query(ExamSession).filter(ExamSession.exam_id == exam_id).count()
+    if session_count:
+        raise AppException(
+            message=(
+                "Paket ujian tidak dapat dihapus karena sudah memiliki "
+                f"{session_count} sesi pengerjaan. Riwayat ujian harus dipertahankan."
+            ),
+            status_code=status.HTTP_409_CONFLICT,
+            error_code="EXAM_HAS_SESSIONS",
+        )
+    answer_count = (
+        db.query(StudentAnswer)
+        .join(ExamSession, StudentAnswer.session_id == ExamSession.id)
+        .filter(ExamSession.exam_id == exam_id)
+        .count()
+    )
+    if answer_count:
+        raise AppException(
+            message=(
+                "Paket ujian tidak dapat dihapus karena sudah memiliki jawaban "
+                "siswa. Riwayat ujian harus dipertahankan."
+            ),
+            status_code=status.HTTP_409_CONFLICT,
+            error_code="EXAM_HAS_ANSWERS",
+        )
+
+    try:
+        db.delete(exam)
+        db.commit()
+    except IntegrityError:
+        # Race safety net: a session/answer created between the checks and
+        # the commit must surface as a clean 409, never a 500 with SQL text.
+        db.rollback()
+        raise AppException(
+            message="Paket ujian tidak dapat dihapus karena masih digunakan oleh data lain.",
+            status_code=status.HTTP_409_CONFLICT,
+            error_code="EXAM_IN_USE",
+        )
+    return ApiResponse.ok(data={"deleted_id": exam_id}, message="Paket ujian berhasil dihapus")
 
 
 @router.post("/{exam_id}/publish", response_model=ApiResponse[ExamResponse])

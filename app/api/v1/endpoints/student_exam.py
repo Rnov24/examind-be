@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Request, BackgroundTasks, status
+from fastapi import APIRouter, Depends, Query, Request, BackgroundTasks, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.database import get_db
@@ -54,6 +54,47 @@ def _remaining_seconds(exam: Exam, session: Optional[ExamSession]) -> int:
         remaining = exam.duration_minutes * 60
     until_end = int((exam.end_time - now).total_seconds())
     return max(0, min(remaining, until_end))
+
+
+def _sanitize_options(options):
+    """Student-safe MCQ options: only ``id`` and ``text`` survive.
+
+    Stored options carry ``is_correct`` / ``rationale`` (see OptionSchema)
+    and the randomizer only strips them when ``randomize_options`` is on, so
+    an exam with shuffling off used to leak the whole answer key in the
+    start response. Whitelisting here is the choke point: it runs after the
+    randomizer, whatever the exam's shuffle flags are. The frontend exam
+    workspace only reads ``id`` / ``text`` (examStore + QuestionCard).
+    """
+    if options is None:
+        return None
+    if isinstance(options, dict):
+        return {"id": options.get("id"), "text": options.get("text")}
+    if isinstance(options, list):
+        return [
+            {"id": o.get("id"), "text": o.get("text")} if isinstance(o, dict) else o
+            for o in options
+        ]
+    return None
+
+
+def _require_window_open(exam: Exam) -> None:
+    """Reject any start / begin / resume once the exam window has closed.
+
+    The session guard only gates NEW sessions; a student with a pre-existing
+    in_progress session could otherwise resume past end_time and get a 200
+    with a 0-second clock. end_time is a hard cap for BOTH modes (live and
+    non_live) — a student still inside the window is unaffected.
+    """
+    if datetime.utcnow() > exam.end_time:
+        raise AppException(
+            message=(
+                "Jendela pengerjaan ujian sudah ditutup "
+                f"({exam.end_time.strftime('%d %b %Y %H:%M')} WIB)."
+            ),
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="EXAM_ENDED",
+        )
 
 
 @router.get("/exams/active", response_model=ApiResponse[List[ExamResponse]])
@@ -119,6 +160,11 @@ def start_exam(
         user_agent=user_agent,
     )
 
+    # Blocker 5: the guard above only gates NEW sessions, so a resume of a
+    # pre-existing in_progress session past end_time must be rejected here
+    # (after the guard, so its aborted/submitted precedence is preserved).
+    _require_window_open(exam)
+
     # Format questions list
     raw_questions = []
     for eq in exam.exam_questions:
@@ -143,6 +189,11 @@ def start_exam(
         randomize_questions=exam.randomize_questions,
         randomize_options=exam.randomize_options,
     )
+
+    # Blocker 1: strip the answer key from every question the student sees,
+    # BEFORE grading. Only id + text are needed to render the workspace.
+    for q in shuffled_questions:
+        q["options_json"] = _sanitize_options(q.get("options_json"))
 
     # Calculate remaining seconds — the clock runs from begun_at when the
     # student has finished the setup wizard; before that, no time is
@@ -240,6 +291,9 @@ def begin_exam(
             status_code=status.HTTP_400_BAD_REQUEST,
             error_code="SESSION_NOT_ACTIVE",
         )
+    # Blocker 5, same hole as start: never stamp begun_at (or hand out a
+    # 0-second clock) once the window has closed.
+    _require_window_open(exam)
     if session.begun_at is None:
         session.begun_at = datetime.utcnow()
         db.commit()
@@ -477,19 +531,54 @@ async def fail_exam_session(
 @router.get("/exam/{exam_id}/result", response_model=ApiResponse[StudentExamResultResponse])
 def get_exam_result(
     exam_id: int,
+    session_id: Optional[int] = Query(
+        None,
+        description="Sesi yang dibuka admin/guru; siswa selalu melihat sesinya sendiri.",
+    ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_student),
+    current_user: User = Depends(get_current_active_user),
 ):
-    session = (
-        db.query(ExamSession)
-        .filter(ExamSession.exam_id == exam_id, ExamSession.student_id == current_user.id)
-        .first()
-    )
-    if not session:
+    """Student result review — plus admin / exam-owning teacher read access
+    (Blocker 3).
+
+    Students always resolve their OWN session for the exam (a session_id
+    parameter from a student is ignored, so one student can never open
+    another's result). Admin / superadmin and the exam's own teacher must
+    pass ?session_id=... (the /results/{sessionId} redirect page carries
+    it); scoping reuses require_session, so a cross-tenant admin or a
+    non-owner teacher gets 404, exactly like the grading endpoints.
+    """
+    if current_user.role == "student":
+        session = (
+            db.query(ExamSession)
+            .filter(ExamSession.exam_id == exam_id, ExamSession.student_id == current_user.id)
+            .first()
+        )
+        if not session:
+            raise AppException(
+                message="Hasil ujian belum tersedia atau sesi belum dibuat.",
+                status_code=status.HTTP_404_NOT_FOUND,
+                error_code="RESULT_NOT_FOUND",
+            )
+    elif current_user.role in ("teacher", "admin", "superadmin"):
+        if session_id is None:
+            raise AppException(
+                message="Untuk melihat hasil siswa lain, buka melalui halaman daftar hasil (/results/{session_id}).",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                error_code="SESSION_ID_REQUIRED",
+            )
+        session = require_session(db, current_user, session_id)
+        if session.exam_id != exam_id:
+            raise AppException(
+                message="Hasil ujian belum tersedia atau sesi belum dibuat.",
+                status_code=status.HTTP_404_NOT_FOUND,
+                error_code="RESULT_NOT_FOUND",
+            )
+    else:
         raise AppException(
-            message="Hasil ujian belum tersedia atau sesi belum dibuat.",
-            status_code=status.HTTP_404_NOT_FOUND,
-            error_code="RESULT_NOT_FOUND",
+            message=f"Akses ditolak untuk peran Anda ({current_user.role}).",
+            status_code=status.HTTP_403_FORBIDDEN,
+            error_code="FORBIDDEN_ROLE",
         )
 
     exam = (
@@ -518,9 +607,15 @@ def get_exam_result(
 
         ans = answers_by_question.get(q.id)
 
-        show_explanation = (
-            exam.explanation_policy == "instant"
-            or (exam.explanation_policy == "after_exam_closed" and session.status in ["graded", "submitted"])
+        # Answer keys / explanations are a POST-GRADING review feature
+        # only. The old "instant" branch exposed them for ANY session
+        # status, including in_progress — a mid-exam student could fetch
+        # /result and read the whole key. Graded sessions keep the full
+        # review payload (per-question correctness included, by design).
+        is_graded = session.status in ["graded", "submitted"]
+        show_explanation = is_graded and exam.explanation_policy in (
+            "instant",
+            "after_exam_closed",
         )
 
         answers_detail.append(
@@ -545,13 +640,18 @@ def get_exam_result(
             )
         )
 
+    # The name on the sheet is the SESSION's student, not the caller —
+    # for an admin/teacher opening another student's result the caller's
+    # own name would be wrong here.
+    student_user = session.student
+
     res = StudentExamResultResponse(
         session_id=session.id,
         exam_id=exam.id,
         exam_title=exam.title,
         subject=exam.class_.name if exam.class_ else "Ujian",
-        student_name=current_user.full_name,
-        student_identifier=current_user.identifier,
+        student_name=student_user.full_name if student_user else current_user.full_name,
+        student_identifier=student_user.identifier if student_user else current_user.identifier,
         status=session.status,
         start_time=session.start_time,
         submit_time=session.submit_time,
@@ -580,6 +680,17 @@ def export_student_result_pdf(
             message="Hasil lembar ujian belum tersedia atau belum diikuti.",
             status_code=status.HTTP_404_NOT_FOUND,
             error_code="RESULT_NOT_FOUND",
+        )
+
+    # Audit find (Blocker 1): the transcript PDF prints a "Kunci / Jawaban
+    # Benar" column for every answered question, and this endpoint had no
+    # status gate — a mid-exam student could download the whole key. The
+    # transcript only exists once grading is done (or the exam ended).
+    if session.status in ["in_progress", "grading_in_progress"]:
+        raise AppException(
+            message="Transkrip hasil baru tersedia setelah penilaian selesai.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            error_code="RESULT_NOT_READY",
         )
 
     pdf_buffer = generate_pdf_student_result(db, session.id)
