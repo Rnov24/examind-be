@@ -1,6 +1,10 @@
+import io
 from datetime import datetime
 from typing import List, Optional
+import openpyxl
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from fastapi import APIRouter, Depends, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.core.exceptions import AppException
@@ -340,5 +344,123 @@ async def deliberate_teacher_disqualify(
     return ApiResponse.ok(
         data={"session_id": session.id, "status": "aborted"},
         message=f"Sesi ujian {student_name} resmi didiskualifikasi oleh pengawas.",
+    )
+
+
+@router.get("/exam/{exam_id}/export/excel")
+def export_exam_camera_log_excel(
+    exam_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_teacher),
+):
+    # Same scoping as GET /proctoring/exam/{exam_id}/logs: 404 when the exam
+    # belongs to another school or another teacher. Students never reach
+    # here (require_teacher rejects them with 403 first).
+    exam = require_exam(db, current_user, exam_id)
+
+    sessions = db.query(ExamSession).filter(ExamSession.exam_id == exam_id).all()
+    session_ids = [s.id for s in sessions]
+    logs = []
+    if session_ids:
+        logs = (
+            db.query(ProctoringLog)
+            .options(joinedload(ProctoringLog.session).joinedload(ExamSession.student))
+            .filter(ProctoringLog.session_id.in_(session_ids))
+            .order_by(ProctoringLog.event_timestamp.asc(), ProctoringLog.id.asc())
+            .all()
+        )
+    session_by_id = {s.id: s for s in sessions}
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Laporan Kamera"
+
+    title_font = Font(name="Calibri", size=16, bold=True, color="1E3A8A")
+    sub_font = Font(name="Calibri", size=11, italic=True)
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1E40AF", end_color="1E40AF", fill_type="solid")
+
+    ws["A1"] = f"LAPORAN LOG KAMERA UJIAN: {exam.title.upper() if exam and exam.title else 'UJIAN'}"
+    ws["A1"].font = title_font
+    ws["A2"] = (
+        f"Guru: {exam.teacher.full_name if exam and exam.teacher else '-'}"
+        f" | Total Kejadian: {len(logs)}"
+    )
+    ws["A2"].font = sub_font
+
+    # NOTE: ProctoringLog stores no per-event integrity score, so the
+    # integrity column below is the session's CURRENT score at export time
+    # (header says so explicitly), not the score at the moment of the event.
+    headers = [
+        "No",
+        "Waktu Kejadian",
+        "Nama Siswa",
+        "NISN / ID",
+        "ID Sesi",
+        "Jenis Kejadian",
+        "Tingkat Keparahan",
+        "Durasi (detik)",
+        "Sumber Kamera",
+        "Verdict Guru",
+        "Sudah Direview",
+        "Skor Integritas Sesi Saat Ini (%)",
+        "Tautan Snapshot",
+    ]
+
+    # Write headers at row 4 (same layout as the gradebook exporter)
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=4, column=col_idx, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    thin_border = Border(
+        left=Side(style="thin", color="CBD5E1"),
+        right=Side(style="thin", color="CBD5E1"),
+        top=Side(style="thin", color="CBD5E1"),
+        bottom=Side(style="thin", color="CBD5E1"),
+    )
+
+    # One row per proctoring log, chronological order.
+    for row_idx, log in enumerate(logs, start=5):
+        session = session_by_id.get(log.session_id)
+        student = session.student if session else None
+        row_data = [
+            row_idx - 4,
+            log.event_timestamp,
+            student.full_name if student else "Siswa",
+            student.identifier if student else "-",
+            log.session_id,
+            log.event_type,
+            log.severity,
+            log.duration_seconds,
+            log.camera_source,
+            log.teacher_verdict,
+            "Ya" if log.reviewed_by_teacher else "Belum",
+            session.integrity_score if session is not None else None,
+            log.snapshot_url or "-",
+        ]
+
+        for col_idx, val in enumerate(row_data, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.border = thin_border
+            if col_idx in [1, 4, 5, 7, 8, 11, 12]:
+                cell.alignment = Alignment(horizontal="center")
+        ws.cell(row=row_idx, column=2).number_format = "yyyy-mm-dd hh:mm:ss"
+
+    # Adjust column widths
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    filename = f"laporan_kamera_exam_{exam_id}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 

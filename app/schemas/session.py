@@ -67,9 +67,15 @@ class StudentAnswerDetail(BaseModel):
     student_response: Optional[str] = None
     is_correct: Optional[bool] = None
     allocated_points: float
-    auto_score: float
+    # Null until grading finishes: while a session is in_progress or
+    # grading_in_progress, /result must not reveal per-question correctness
+    # (Finding 3 — a student polling /result mid-grading could otherwise
+    # read which MCQ answers were right). Graded/submitted sessions keep
+    # the real values. The grading workspace (grading.py) still passes
+    # floats here; Optional accepts both.
+    auto_score: Optional[float] = None
     teacher_override_score: Optional[float] = None
-    final_score: float
+    final_score: Optional[float] = None
     ai_confidence_level: Optional[str] = None
     ai_grading_rationale: Optional[str] = None
     ai_explanation: Optional[str] = None

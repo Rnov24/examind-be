@@ -19,12 +19,13 @@ class ProctoringLog(Base):
             "suspicious_object",
             "companion_disconnected",
             "phone_detected",
+            "teacher_disqualification",
             name="proctoring_event_types",
         ),
         nullable=False,
     )
     camera_source = Column(
-        Enum("primary_camera", "secondary_camera", "system_event", name="camera_sources"),
+        Enum("primary_camera", "secondary_camera", "system_event", "human_supervisor", name="camera_sources"),
         nullable=False,
     )
     severity = Column(Enum("low", "medium", "high", name="violation_severities"), nullable=False)

@@ -147,8 +147,16 @@ def db_session():
              duration_minutes=60, start_time=now - timedelta(hours=1),
              end_time=now + timedelta(hours=2), status="published",
              exam_mode="live"),
+        # 9: LIVE, window open, student 6 GRADING_IN_PROGRESS with
+        # already-stored instant MCQ scores (Finding 3 fixture: the
+        # submit path writes is_correct / auto_score / final_score
+        # before the async essay grading finishes).
+        Exam(id=9, teacher_id=4, class_id=1, title="Sedang Dinilai",
+             duration_minutes=60, start_time=now - timedelta(hours=1),
+             end_time=now + timedelta(hours=2), status="published",
+             exam_mode="live"),
     ])
-    for exam_id in (1, 2, 5, 6, 7, 8):
+    for exam_id in (1, 2, 5, 6, 7, 8, 9):
         db.add_all([
             ExamQuestion(exam_id=exam_id, question_id=1, order_index=1, allocated_points=10),
             ExamQuestion(exam_id=exam_id, question_id=2, order_index=2, allocated_points=10),
@@ -186,6 +194,23 @@ def db_session():
                     begun_at=now - timedelta(minutes=30),
                     status="in_progress", total_score=0.0, integrity_score=100,
                     pairing_token="tok-80"),
+        ExamSession(id=90, exam_id=9, student_id=6,
+                    start_time=now - timedelta(minutes=30),
+                    begun_at=now - timedelta(minutes=30),
+                    submit_time=now - timedelta(minutes=5),
+                    status="grading_in_progress", total_score=10.0,
+                    integrity_score=100, pairing_token="tok-90"),
+        StudentAnswer(session_id=90, question_id=1, student_response="B",
+                      is_correct=True, auto_score=10, final_score=10),
+        StudentAnswer(session_id=90, question_id=2, student_response="B",
+                      is_correct=False, auto_score=0, final_score=0),
+        # Essay with a teacher override already entered mid-grading.
+        StudentAnswer(session_id=90, question_id=3,
+                      student_response="Fotosintesis adalah proses tumbuhan.",
+                      is_correct=None, auto_score=0, final_score=7,
+                      teacher_override_score=7,
+                      ai_confidence_level="high",
+                      ai_explanation="Penjelasan esai."),
         StudentAnswer(session_id=60, question_id=1, student_response="B",
                       is_correct=True, auto_score=10, final_score=10),
         StudentAnswer(session_id=60, question_id=2, student_response="B",
@@ -295,6 +320,61 @@ def test_result_hides_key_before_grading_even_with_instant_policy(client):
         assert ans["options_json"] is None
         assert ans["correct_answer"] is None
         assert ans["is_correct"] is None
+
+
+def test_grading_in_progress_result_hides_correctness(client):
+    # Finding 3: session 90 is grading_in_progress with instant MCQ
+    # scores already stored (Q1 correct 10/10, Q2 wrong 0/0, essay
+    # override 7). A student polling /result mid-grading must see NO
+    # per-question correctness — null, not 0 — for every answer.
+    resp = client.get("/api/v1/student/exam/9/result", headers=_auth(6))
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["status"] == "grading_in_progress"
+    answers = {a["question_id"]: a for a in data["answers"]}
+    assert len(answers) == 3
+    for qid, ans in answers.items():
+        assert ans["is_correct"] is None, f"Q{qid} leaked is_correct"
+        assert ans["auto_score"] is None, f"Q{qid} leaked auto_score"
+        assert ans["final_score"] is None, f"Q{qid} leaked final_score"
+        assert ans["teacher_override_score"] is None, f"Q{qid} leaked override"
+        assert ans["correct_answer"] is None
+        assert ans["options_json"] is None
+    # The student's own responses are theirs; they stay visible.
+    assert answers[1]["student_response"] == "B"
+    assert answers[3]["student_response"].startswith("Fotosintesis")
+    # Same gate for every role: the admin and the exam-owning teacher
+    # read through the same get_exam_result function.
+    for user_id in (9, 4):
+        resp = client.get("/api/v1/student/exam/9/result?session_id=90",
+                          headers=_auth(user_id))
+        assert resp.status_code == 200
+        for ans in resp.json()["data"]["answers"]:
+            assert ans["is_correct"] is None
+            assert ans["auto_score"] is None
+            assert ans["final_score"] is None
+            assert ans["teacher_override_score"] is None
+
+
+def test_graded_result_reveals_correctness_after_flip(client, db_session):
+    # Flip the SAME session 90 to graded: the identical payload must
+    # now carry the real per-question values, exactly as stored.
+    db_session.query(ExamSession).filter(ExamSession.id == 90).update(
+        {"status": "graded"})
+    db_session.commit()
+    resp = client.get("/api/v1/student/exam/9/result", headers=_auth(6))
+    assert resp.status_code == 200
+    assert resp.json()["data"]["status"] == "graded"
+    answers = {a["question_id"]: a for a in resp.json()["data"]["answers"]}
+    assert answers[1]["is_correct"] is True
+    assert answers[1]["auto_score"] == 10.0
+    assert answers[1]["final_score"] == 10.0
+    assert answers[2]["is_correct"] is False
+    assert answers[2]["auto_score"] == 0.0
+    assert answers[2]["final_score"] == 0.0
+    assert answers[3]["teacher_override_score"] == 7.0
+    assert answers[3]["final_score"] == 7.0
+    assert answers[1]["correct_answer"] == "B"
 
 
 def test_in_progress_own_result_hides_key(client):

@@ -612,6 +612,16 @@ def get_exam_result(
         # status, including in_progress — a mid-exam student could fetch
         # /result and read the whole key. Graded sessions keep the full
         # review payload (per-question correctness included, by design).
+        #
+        # Finding 3 extends the same gate to the per-question correctness
+        # fields themselves: submit_exam() already runs instant MCQ
+        # scoring and stores is_correct / auto_score / final_score while
+        # the session is grading_in_progress, so an ungated /result let a
+        # polling student learn which MCQ answers were right (and any
+        # teacher_override_score set on an essay early). All four fields
+        # stay null until the session is graded/submitted. The gate sits
+        # in this one function, so student, admin and exam-owning teacher
+        # reads of /result are all covered.
         is_graded = session.status in ["graded", "submitted"]
         show_explanation = is_graded and exam.explanation_policy in (
             "instant",
@@ -627,11 +637,11 @@ def get_exam_result(
                 options_json=q.options_json if show_explanation else None,
                 correct_answer=q.correct_answer if show_explanation else None,
                 student_response=ans.student_response if ans else None,
-                is_correct=ans.is_correct if ans else None,
+                is_correct=ans.is_correct if (ans and is_graded) else None,
                 allocated_points=pts,
-                auto_score=float(ans.auto_score or 0.0) if ans else 0.0,
-                teacher_override_score=float(ans.teacher_override_score) if ans and ans.teacher_override_score is not None else None,
-                final_score=float(ans.final_score or 0.0) if ans else 0.0,
+                auto_score=float(ans.auto_score or 0.0) if (ans and is_graded) else None,
+                teacher_override_score=float(ans.teacher_override_score) if (ans and is_graded and ans.teacher_override_score is not None) else None,
+                final_score=float(ans.final_score or 0.0) if (ans and is_graded) else None,
                 ai_confidence_level=ans.ai_confidence_level if ans and show_explanation else None,
                 ai_grading_rationale=ans.ai_grading_rationale if ans and show_explanation else None,
                 ai_explanation=ans.ai_explanation if ans and show_explanation else None,
