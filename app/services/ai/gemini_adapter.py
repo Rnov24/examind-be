@@ -4,9 +4,13 @@ import hashlib
 from typing import Dict, Any, List, Optional
 import requests
 
+from fastapi import status
+
 from app.core.config import settings
 from app.core.cache import memory_cache
+from app.core.exceptions import AppException
 from app.services.ai.base import AIServiceInterface
+from app.services.ai.dedup import dedupe_essays, dedupe_mcqs
 from app.services.ai.mock_adapter import mock_ai_service
 from app.services.ai.safety import SAFETY_SYSTEM_PROMPT
 from app.schemas.question import (
@@ -60,6 +64,21 @@ def _route_or_gemini(
         return routed
     logger.warning(f"[GeminiAdapter] round-robin failed for {task_id}; falling back to Gemini.")
     return gemini_fn()
+
+
+def _question_gen_temperature() -> float:
+    """Temperature for TASK_QUESTION_GEN from the task config (default 0.7).
+
+    Same get_task_config pattern openrouter_chat uses for its tasks; falls
+    back to the task default when the config cannot be read. The old code
+    hardcoded 0.2 here even though the task config says 0.7.
+    """
+    try:
+        from app.services.ai.provider_router import get_task_config
+
+        return float(get_task_config("TASK_QUESTION_GEN").get("temperature", 0.7))
+    except Exception:
+        return 0.7
 
 
 class GeminiAdapter(AIServiceInterface):
@@ -284,6 +303,151 @@ class GeminiAdapter(AIServiceInterface):
             ]
         return None
 
+    @staticmethod
+    def _parse_generated(parsed: Dict[str, Any], request: AIGenerateRequest):
+        """Parse one model JSON payload into (mcq_list, essay_list)."""
+        mcq_list = []
+        for q in parsed.get("mcq_questions", []):
+            opts = [OptionSchema(**opt) for opt in q.get("options", [])]
+            mcq_list.append(
+                GeneratedQuestionMCQ(
+                    prompt=q["prompt"],
+                    difficulty=q.get("difficulty", request.difficulty),
+                    bloom_level=q.get("bloom_level", "C3"),
+                    options=opts,
+                    correct_option_id=q["correct_option_id"],
+                    explanation=q.get("explanation", ""),
+                    points=float(q.get("points", 10.0)),
+                )
+            )
+
+        essay_list = []
+        for q in parsed.get("essay_questions", []):
+            rubric_dict = q.get("rubric", {})
+            ref_pts = q.get("ref_points")
+            if ref_pts:
+                rubric_dict["ref_points"] = ref_pts
+
+            essay_list.append(
+                GeneratedQuestionEssay(
+                    prompt=q["prompt"],
+                    difficulty=q.get("difficulty", request.difficulty),
+                    bloom_level=q.get("bloom_level", "C4"),
+                    rubric=rubric_dict,
+                    ideal_answer=q.get("sample_answer") or q.get("ideal_answer", ""),
+                    explanation=q.get("explanation", ""),
+                    points=float(q.get("points", 20.0)),
+                )
+            )
+        return mcq_list, essay_list
+
+    def _attempt_models(
+        self,
+        request: AIGenerateRequest,
+        user_prompt: str,
+        system_prompt: str,
+        temperature: float,
+    ):
+        """Try each configured model in order until one returns a parseable,
+        non-empty question batch.
+
+        Order: the task's configured provider first, then the rest of
+        ``providers_supported`` from TASK_QUESTION_GEN in configured order
+        (gemini, openai, claude, deepseek, ollama by default). A provider
+        counts as failed when it returns nothing, raises, returns unparseable
+        JSON, or returns a batch with zero questions — the next model is
+        tried. Returns (mcq_list, essay_list, provider), or
+        (None, None, None) when every model failed.
+
+        This drives the router's per-provider attempt directly instead of
+        ``route_chat``: route_chat returns text only, so it cannot say WHICH
+        model served the batch — and provenance (which model actually
+        produced the questions) is a requirement here.
+        """
+        from app.services.ai.provider_router import _try_provider, get_task_config
+
+        config = get_task_config("TASK_QUESTION_GEN")
+        primary = (config.get("provider") or "gemini").strip().lower()
+        supported = [str(p).strip().lower() for p in (config.get("providers_supported") or []) if p]
+        ordered = list(dict.fromkeys([primary] + supported))
+
+        def _gemini_fn():
+            return self._call_gemini(
+                user_prompt,
+                system_instruction=system_prompt,
+                json_mode=True,
+                temperature=temperature,
+                api_key=request.api_key,
+            )
+
+        for provider in ordered:
+            try:
+                raw_json = _try_provider(
+                    provider, config, user_prompt, None, system_prompt,
+                    temperature, 30.0, True, _gemini_fn,
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"[GeminiAdapter] question-gen provider={provider} raised: {exc}"
+                )
+                raw_json = None
+            if not raw_json:
+                logger.warning(
+                    f"[GeminiAdapter] question-gen provider={provider} returned nothing; trying next model."
+                )
+                continue
+            try:
+                mcq_list, essay_list = self._parse_generated(json.loads(raw_json), request)
+            except Exception as parse_err:
+                logger.warning(
+                    f"[GeminiAdapter] question-gen provider={provider} unparseable JSON: {parse_err}; trying next model."
+                )
+                continue
+            if mcq_list or essay_list:
+                return mcq_list, essay_list, provider
+            logger.warning(
+                f"[GeminiAdapter] question-gen provider={provider} returned zero questions; trying next model."
+            )
+        return None, None, None
+
+    def _top_up_questions(
+        self,
+        request: AIGenerateRequest,
+        system_prompt: str,
+        kept_mcqs,
+        kept_essays,
+        missing_mcq: int,
+        missing_essay: int,
+        temperature: float,
+    ):
+        """ONE retry asking the models for exactly the missing distinct questions.
+
+        Same model chain as the main call (see _attempt_models) — never the
+        template mock. The kept stems are listed so no model repeats them. A
+        failed top-up is non-fatal: the caller returns the distinct set it
+        already has, never pads with duplicates.
+        """
+        kept_stems = [q.prompt for q in kept_mcqs] + [q.prompt for q in kept_essays]
+        listed = "\n".join(f"{n}. {s[:120]}" for n, s in enumerate(kept_stems, 1))
+        user_prompt = (
+            f"Mata Pelajaran: {request.subject}\n"
+            f"Topik/Materi: {request.topic_content}\n"
+            f"Tingkat Kelas: {request.grade_level}\n"
+            f"Tingkat Kesulitan: {request.difficulty}\n"
+            f"Buatkan TAMBAHAN tepat {missing_mcq} soal pilihan ganda dan {missing_essay} soal esai "
+            "yang BERBEDA dari soal-soal berikut. Jangan ulangi atau parafrase soal yang sudah ada:\n"
+            f"{listed}\n"
+            "Setiap soal tambahan HARUS menguji sub-konsep/aspek yang berbeda dari topik dan berbeda "
+            "dari semua soal di atas. Variasikan level Bloom dan huruf kunci jawaban. "
+            "Output WAJIB berupa JSON murni dengan format yang sama seperti sebelumnya."
+        )
+        top_mcqs, top_essays, _top_provider = self._attempt_models(
+            request, user_prompt, system_prompt, temperature
+        )
+        if top_mcqs is None:
+            return [], []
+        return top_mcqs, top_essays
+
     def generate_questions(self, request: AIGenerateRequest) -> AIGenerateData:
         system_prompt = (
             "Anda adalah pakar kurikulum dan penyusun soal ujian nasional Kemendikbud. "
@@ -332,6 +496,12 @@ class GeminiAdapter(AIServiceInterface):
             'dimensi rubrik yang bersesuaian (Konsep 0.40, Argumen 0.30, Terminologi 0.15, \n'
             'Kejelasan 0.15) — penilai memakai ref_points dan bobot ini apa adanya, jadi \n'
             'angka yang kamu tulis di sini adalah angka yang menentukan nilai siswa.\n'
+            'ATURAN KEBERAGAMAN (WAJIB): Setiap butir soal HARUS menguji sub-konsep atau \n'
+            'aspek yang BERBEDA dari topik — tidak ada dua soal yang boleh mengulang, \n'
+            'memparafrase, atau menanyakan hal yang sama dengan kata berbeda. Variasikan \n'
+            'level Bloom (C1-C6) antar soal dalam satu set, dan variasikan huruf kunci \n'
+            'jawaban (A/B/C/D) antar soal. Soal yang menduplikasi soal lain dalam set \n'
+            'akan ditolak.\n'
         )
 
         user_prompt = (
@@ -343,64 +513,49 @@ class GeminiAdapter(AIServiceInterface):
             f"Tingkat Kesulitan: {request.difficulty}\n"
         )
 
-        raw_json = _route_or_gemini(
-            task_id="TASK_QUESTION_GEN",
-            message=user_prompt,
-            history=None,
-            system_instruction=system_prompt,
-            json_mode=True,
-            temperature=0.2,
-            gemini_fn=lambda: self._call_gemini(
-                user_prompt,
-                system_instruction=system_prompt,
-                json_mode=True,
-                api_key=request.api_key,
-            ),
+        temperature = _question_gen_temperature()
+        mcq_list, essay_list, provider = self._attempt_models(
+            request, user_prompt, system_prompt, temperature
         )
-        if raw_json:
-            try:
-                parsed = json.loads(raw_json)
-                mcq_list = []
-                for q in parsed.get("mcq_questions", []):
-                    opts = [OptionSchema(**opt) for opt in q.get("options", [])]
-                    mcq_list.append(
-                        GeneratedQuestionMCQ(
-                            prompt=q["prompt"],
-                            difficulty=q.get("difficulty", request.difficulty),
-                            bloom_level=q.get("bloom_level", "C3"),
-                            options=opts,
-                            correct_option_id=q["correct_option_id"],
-                            explanation=q.get("explanation", ""),
-                            points=float(q.get("points", 10.0)),
-                        )
-                    )
+        if provider is None:
+            # Every model failed: fail honestly. A template batch would be
+            # fake AI output pretending to be generated questions.
+            logger.error(
+                "[QuestionGen] task=TASK_QUESTION_GEN all models failed; "
+                "refusing to serve template questions."
+            )
+            raise AppException(
+                message=(
+                    "Layanan AI tidak dapat dijangkau saat ini, sehingga soal "
+                    "belum dapat dibuat. Silakan coba lagi beberapa saat lagi."
+                ),
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                error_code="AI_SERVICE_UNAVAILABLE",
+            )
 
-                essay_list = []
-                for q in parsed.get("essay_questions", []):
-                    rubric_dict = q.get("rubric", {})
-                    ref_pts = q.get("ref_points")
-                    if ref_pts:
-                        rubric_dict["ref_points"] = ref_pts
-
-                    essay_list.append(
-                        GeneratedQuestionEssay(
-                            prompt=q["prompt"],
-                            difficulty=q.get("difficulty", request.difficulty),
-                            bloom_level=q.get("bloom_level", "C4"),
-                            rubric=rubric_dict,
-                            ideal_answer=q.get("sample_answer") or q.get("ideal_answer", ""),
-                            explanation=q.get("explanation", ""),
-                            points=float(q.get("points", 20.0)),
-                        )
-                    )
-
-                if mcq_list or essay_list:
-                    return AIGenerateData(mcq_questions=mcq_list, essay_questions=essay_list)
-            except Exception as parse_err:
-                logger.warning(f"[GeminiAdapter] Failed to parse Gemini response: {parse_err}")
-
-        # Fallback to mock service
-        return mock_ai_service.generate_questions(request)
+        # Uniqueness defense: drop exact + near-duplicate questions, then
+        # top up ONCE via the models if the set shrank. The batch is labelled
+        # by the provider that served the main batch (a top-up from another
+        # model does not relabel it).
+        mcq_list = dedupe_mcqs(mcq_list)
+        essay_list = dedupe_essays(essay_list)
+        missing_mcq = max(0, request.mcq_count - len(mcq_list))
+        missing_essay = max(0, request.essay_count - len(essay_list))
+        if missing_mcq or missing_essay:
+            top_mcqs, top_essays = self._top_up_questions(
+                request, system_prompt, mcq_list, essay_list,
+                missing_mcq, missing_essay, temperature,
+            )
+            mcq_list = dedupe_mcqs(mcq_list + top_mcqs)
+            essay_list = dedupe_essays(essay_list + top_essays)
+        logger.info(
+            f"[QuestionGen] task=TASK_QUESTION_GEN provider={provider} "
+            f"mcq={len(mcq_list)} essay={len(essay_list)} "
+            f"requested_mcq={request.mcq_count} requested_essay={request.essay_count}"
+        )
+        return AIGenerateData(
+            mcq_questions=mcq_list, essay_questions=essay_list, provider=provider
+        )
 
     def grade_essay(
         self, prompt: str, rubric: Dict[str, Any], ideal_answer: str, student_answer: str,

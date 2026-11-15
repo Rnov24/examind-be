@@ -7,6 +7,7 @@ from app.models.user import User
 from app.schemas.question import AIGenerateRequest, AIGenerateData
 from app.schemas.common import ApiResponse
 from app.services.ai import get_ai_service
+from app.services.ai.gemini_adapter import gemini_ai_service
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +19,11 @@ def generate_questions(
     request: AIGenerateRequest,
     current_user: User = Depends(require_teacher),
 ):
-    ai_service = get_ai_service()
-    data = ai_service.generate_questions(request)
+    # Question generation must use the MODEL path. get_ai_service() returns
+    # the template mock when AI_PROVIDER != "gemini", and template questions
+    # must never be served as AI-generated (Jal, 2026-11-15). The adapter
+    # itself raises an honest 503 when every model fails.
+    data = gemini_ai_service.generate_questions(request)
     return ApiResponse.ok(data=data, message="Draft soal berhasil di-generate oleh AI")
 
 
@@ -59,8 +63,8 @@ async def extract_and_generate(
         essay_count=essay_count,
         difficulty=difficulty,
     )
-    ai_service = get_ai_service()
-    data = ai_service.generate_questions(req)
+    # Same as /generate-questions: model path only, never the template mock.
+    data = gemini_ai_service.generate_questions(req)
     return ApiResponse.ok(data=data, message="Soal berhasil diekstrak dan di-generate dari dokumen")
 
 

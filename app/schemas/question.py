@@ -126,3 +126,8 @@ class GeneratedQuestionEssay(BaseModel):
 class AIGenerateData(BaseModel):
     mcq_questions: List[GeneratedQuestionMCQ]
     essay_questions: List[GeneratedQuestionEssay]
+    # Which model actually served this batch ("gemini", "openai", "claude",
+    # "deepseek", "ollama"). Template questions are never served: when every
+    # model fails, generation raises an honest 503 instead, so this field
+    # always names a real model.
+    provider: str = "gemini"
