@@ -33,7 +33,7 @@ def _seed_impl():
 
     random.seed(42)
     db = SessionLocal()
-    now = datetime.utcnow()
+    now = datetime.now()
     dummy_pw = get_password_hash("Dummy123!")
 
     schools = [

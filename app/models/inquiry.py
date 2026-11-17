@@ -23,5 +23,5 @@ class Inquiry(Base):
     notes = Column(Text, nullable=True)
     # new | contacted | closed
     status = Column(String(20), nullable=False, default="new", index=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)

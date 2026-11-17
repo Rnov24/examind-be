@@ -12,7 +12,7 @@ class Class(Base):
     grade_level = Column(String(20), nullable=False)
     academic_year = Column(String(20), nullable=False)
     created_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     # Relationships
     creator = relationship("User", back_populates="classes_created")
@@ -27,7 +27,7 @@ class ClassMember(Base):
     class_id = Column(Integer, ForeignKey("classes.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     role = Column(Enum("teacher", "student", name="class_member_roles"), nullable=False)
-    joined_at = Column(DateTime, default=datetime.utcnow)
+    joined_at = Column(DateTime, default=datetime.now)
 
     __table_args__ = (
         UniqueConstraint("class_id", "user_id", name="uq_class_user"),

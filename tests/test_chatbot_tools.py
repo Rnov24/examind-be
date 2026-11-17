@@ -70,7 +70,7 @@ def world(db_session):
     db_session.add(cls)
     db_session.add(ClassMember(id=1, class_id=1, user_id=student_a.id, role="student"))
 
-    now = datetime.utcnow()
+    now = datetime.now()
     exam = Exam(
         id=1,
         teacher_id=teacher_a.id,

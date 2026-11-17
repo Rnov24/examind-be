@@ -10,7 +10,7 @@ class ExamSession(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     exam_id = Column(Integer, ForeignKey("exams.id", ondelete="CASCADE"), nullable=False, index=True)
     student_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    start_time = Column(DateTime, default=datetime.utcnow, nullable=False)
+    start_time = Column(DateTime, default=datetime.now, nullable=False)
     # When the student actually began answering (after the camera-setup
     # wizard). NULL = still preparing; the exam clock runs from begun_at
     # when set so setup time never eats into the exam duration.
@@ -77,7 +77,7 @@ class AutosaveSnapshot(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     session_id = Column(Integer, ForeignKey("exam_sessions.id", ondelete="CASCADE"), unique=True, nullable=False)
     answers_payload = Column(JSON, nullable=False)
-    last_saved_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_saved_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     # Relationships
     session = relationship("ExamSession", back_populates="autosave_snapshot")

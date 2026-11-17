@@ -212,7 +212,7 @@ def create_tenant(
         max_tea = max_tea or 200
         ai_credits = ai_credits or 5000
 
-    now = datetime.utcnow()
+    now = datetime.now()
     due_date = payload.subscription_due_date or (now + timedelta(days=30))
     grace_ends = payload.grace_period_ends or (due_date + timedelta(days=7))
 
@@ -794,7 +794,7 @@ def get_superadmin_finance_analytics(
     active_count = sum(1 for t in tenants if t.is_active)
     arpu = (mrr // active_count) if active_count > 0 else 0
 
-    now = datetime.utcnow()
+    now = datetime.now()
 
     # Real Historical 6-Month MRR trend from REAL Tenant.created_at dates
     mrr_history = []
@@ -930,7 +930,7 @@ def get_superadmin_telemetry(
     from app.models.session import ExamSession
 
     JAKARTA_OFFSET = timedelta(hours=7)
-    now_jakarta = datetime.utcnow() + JAKARTA_OFFSET
+    now_jakarta = datetime.now() + JAKARTA_OFFSET
     today_jakarta = now_jakarta.date()
     days = [today_jakarta - timedelta(days=i) for i in range(6, -1, -1)]
 

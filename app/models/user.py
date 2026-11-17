@@ -17,8 +17,8 @@ class User(Base):
     avatar_url = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True, index=True)
     is_email_verified = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     # Relationships
     tenant = relationship("Tenant", back_populates="users")

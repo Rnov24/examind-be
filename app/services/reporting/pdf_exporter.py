@@ -44,7 +44,7 @@ def generate_pdf_berita_acara(db: Session, exam_id: int) -> io.BytesIO:
     story.append(Spacer(1, 15))
 
     # Meta table
-    now_str = datetime.utcnow().strftime("%d %B %Y")
+    now_str = datetime.now().strftime("%d %B %Y")
     meta_data = [
         ["Mata Pelajaran:", exam.title if exam else "-", "Tanggal Ujian:", exam.start_time.strftime("%d %B %Y") if exam else "-"],
         ["Kelas / Rombel:", exam.class_.name if exam and exam.class_ else "-", "Guru Penguji:", exam.teacher.full_name if exam and exam.teacher else "-"],
@@ -144,7 +144,7 @@ def generate_pdf_student_result(db: Session, session_id: int) -> io.BytesIO:
     story.append(Spacer(1, 15))
 
     # Meta table
-    now_str = datetime.utcnow().strftime("%d %B %Y")
+    now_str = datetime.now().strftime("%d %B %Y")
     submit_str = session.submit_time.strftime("%d %B %Y %H:%M") if session.submit_time else "-"
     meta_data = [
         ["Nama Siswa:", student.full_name if student else "-", "Mata Pelajaran:", exam.title if exam else "-"],

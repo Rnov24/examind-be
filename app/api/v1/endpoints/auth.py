@@ -155,7 +155,7 @@ def verify_registration_code(request: VerifyRegistrationCodeRequest, db: Session
             error_code="EMPTY_CODE",
         )
 
-    now = datetime.utcnow()
+    now = datetime.now()
     reg_code = (
         db.query(TenantRegistrationCode)
         .filter(
@@ -257,7 +257,7 @@ async def register(request: Request, payload: SchoolRegisterRequest, db: Session
         )
 
     # Validate registration code
-    now = datetime.utcnow()
+    now = datetime.now()
     reg_code = (
         db.query(TenantRegistrationCode)
         .filter(
@@ -359,7 +359,7 @@ async def register(request: Request, payload: SchoolRegisterRequest, db: Session
 
         otp_code = generate_otp(6)
         expires_in_minutes = 10
-        expires_at = datetime.utcnow() + timedelta(minutes=expires_in_minutes)
+        expires_at = datetime.now() + timedelta(minutes=expires_in_minutes)
 
         verification = EmailVerification(
             email=clean_email,
@@ -424,7 +424,7 @@ async def send_otp(request: Request, payload: SendOtpRequest, db: Session = Depe
 
     otp_code = generate_otp(6)
     expires_in_minutes = 10
-    expires_at = datetime.utcnow() + timedelta(minutes=expires_in_minutes)
+    expires_at = datetime.now() + timedelta(minutes=expires_in_minutes)
 
     verification = EmailVerification(
         email=str(payload.email),
@@ -464,7 +464,7 @@ async def send_otp(request: Request, payload: SendOtpRequest, db: Session = Depe
 @limiter.limit("10/minute")
 def verify_otp(request: Request, payload: VerifyOtpRequest, db: Session = Depends(get_db)):
     """Validate 6-digit OTP and mark email as verified."""
-    now = datetime.utcnow()
+    now = datetime.now()
 
     # Query active verification records for email and purpose
     verification = (
@@ -575,7 +575,7 @@ async def forgot_password(request: Request, payload: ForgotPasswordRequest, db: 
     # Generate cryptographically secure tokens
     reset_token = secrets.token_urlsafe(32)
     short_code = generate_otp(6)
-    expires_at = datetime.utcnow() + timedelta(minutes=expires_in_minutes)
+    expires_at = datetime.now() + timedelta(minutes=expires_in_minutes)
 
     # Persist both URL token and 6-digit manual OTP code
     token_entry = EmailVerification(
@@ -649,7 +649,7 @@ def verify_reset_token(request: Request, payload: VerifyResetTokenRequest, db: S
             error_code="EMPTY_TOKEN",
         )
 
-    now = datetime.utcnow()
+    now = datetime.now()
     query = db.query(EmailVerification).filter(
         EmailVerification.otp_code == clean_token,
         EmailVerification.purpose.in_(["password_reset", "password_reset_code"]),
@@ -708,7 +708,7 @@ async def reset_password(request: Request, payload: ResetPasswordRequest, db: Se
             error_code="PASSWORD_MISMATCH",
         )
 
-    now = datetime.utcnow()
+    now = datetime.now()
     query = db.query(EmailVerification).filter(
         EmailVerification.otp_code == clean_token,
         EmailVerification.purpose.in_(["password_reset", "password_reset_code"]),

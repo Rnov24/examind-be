@@ -31,7 +31,7 @@ class ProctoringLog(Base):
     severity = Column(Enum("low", "medium", "high", name="violation_severities"), nullable=False)
     duration_seconds = Column(Integer, default=1)
     snapshot_url = Column(String(255), nullable=True)
-    event_timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    event_timestamp = Column(DateTime, default=datetime.now, nullable=False, index=True)
     reviewed_by_teacher = Column(Boolean, default=False)
     teacher_verdict = Column(
         Enum("ignored_false_positive", "confirmed_violation", "pending", name="teacher_verdicts"),

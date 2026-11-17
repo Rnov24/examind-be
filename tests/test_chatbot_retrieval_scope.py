@@ -36,7 +36,7 @@ def db_session():
     # Clear memory cache before and after tests
     memory_cache.clear()
 
-    now = datetime.utcnow()
+    now = datetime.now()
 
     # 1. Seed Tenants
     t1 = Tenant(

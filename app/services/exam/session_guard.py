@@ -24,7 +24,7 @@ def get_or_create_exam_session(
 
     Returns: (session, is_new, pairing_token)
     """
-    now = datetime.utcnow()
+    now = datetime.now()
 
     # Time validation: exam must be active and published
     if exam.status not in ["published", "in_progress"]:

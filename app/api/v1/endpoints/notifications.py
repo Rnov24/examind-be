@@ -35,7 +35,7 @@ def _iso(dt):
 
 def _jakarta_today_window_utc():
     """(start_utc, end_utc) covering today's Asia/Jakarta calendar day."""
-    today_jakarta = (datetime.utcnow() + JAKARTA_OFFSET).date()
+    today_jakarta = (datetime.now() + JAKARTA_OFFSET).date()
     start_utc = datetime.combine(today_jakarta, datetime.min.time()) - JAKARTA_OFFSET
     return start_utc, start_utc + timedelta(days=1)
 
@@ -109,7 +109,7 @@ def _sessions_submitted_today(db, extra_filters):
 
 def _superadmin_items(db):
     items = []
-    now = datetime.utcnow()
+    now = datetime.now()
 
     # Schools registered in the last 7 days
     try:
@@ -236,7 +236,7 @@ def _admin_items(db, user):
     items = []
     if user.tenant_id is None:
         return items
-    since = datetime.utcnow() - timedelta(hours=24)
+    since = datetime.now() - timedelta(hours=24)
     try:
         items.extend(
             _violations_per_exam(db, since, [User.tenant_id == user.tenant_id])
@@ -255,7 +255,7 @@ def _admin_items(db, user):
 
 def _teacher_items(db, user):
     items = []
-    since = datetime.utcnow() - timedelta(hours=24)
+    since = datetime.now() - timedelta(hours=24)
     try:
         items.extend(
             _violations_per_exam(db, since, [Exam.teacher_id == user.id])

@@ -180,7 +180,7 @@ def grade_exam_session_async(session_id: int):
                 ans.ai_confidence_level = grading_res.get("confidence_level", "medium")
                 ans.ai_grading_rationale = grading_res.get("rationale")
                 ans.ai_explanation = grading_res.get("explanation")
-                ans.graded_at = datetime.utcnow()
+                ans.graded_at = datetime.now()
 
                 total_session_score += float(ans.final_score or 0.0)
 

@@ -222,7 +222,7 @@ def override_answer_score(
     ans.final_score = request.teacher_override_score
     if request.teacher_notes is not None:
         ans.teacher_notes = request.teacher_notes
-    ans.graded_at = datetime.utcnow()
+    ans.graded_at = datetime.now()
 
     # Recalculate session total score
     session = ans.session

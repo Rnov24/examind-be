@@ -55,7 +55,7 @@ def db_session():
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
 
-    now = datetime.utcnow()
+    now = datetime.now()
     db.add_all([
         Tenant(id=1, name="Sekolah A", code="SCH-A"),
         Tenant(id=2, name="Sekolah B", code="SCH-B"),
@@ -190,8 +190,8 @@ def test_teacher_cannot_read_or_modify_other_tenant_exam(client):
 def test_teacher_cannot_create_exam_for_other_tenant_class(client):
     resp = client.post("/api/v1/exams", headers=_auth(4), json={
         "class_id": 2, "title": "Ujian Siluman", "duration_minutes": 30,
-        "start_time": (datetime.utcnow() + timedelta(hours=1)).isoformat(),
-        "end_time": (datetime.utcnow() + timedelta(hours=2)).isoformat(),
+        "start_time": (datetime.now() + timedelta(hours=1)).isoformat(),
+        "end_time": (datetime.now() + timedelta(hours=2)).isoformat(),
     })
     assert resp.status_code == 404
 

@@ -39,7 +39,7 @@ class Exam(Base):
         default="draft",
         index=True,
     )
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     # Relationships
     teacher = relationship("User", back_populates="exams_created")

@@ -53,7 +53,7 @@ def db_session():
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
 
-    now = datetime.utcnow()
+    now = datetime.now()
     db.add_all([
         Tenant(id=1, name="Sekolah A", code="SCH-A"),
         _user(4, "TCH-A", "guru-a@sch-a.id", "teacher", 1, "Guru A"),

@@ -294,7 +294,7 @@ def seed_database():
 
         # 5. Exams
         print("\n6. Seeding Examination Packages...")
-        now = datetime.utcnow()
+        now = datetime.now()
 
         # Exam 1: Completed Physics Exam
         exam_1 = db.query(Exam).filter(Exam.title == "Penilaian Akhir Semester — Fisika Kuantum").first()

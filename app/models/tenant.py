@@ -31,8 +31,8 @@ class Tenant(Base):
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     subscription_due_date = Column(DateTime, nullable=True)
     grace_period_ends = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     # Relationships
     users = relationship("User", back_populates="tenant", cascade="all, delete-orphan")
@@ -46,7 +46,7 @@ class SubscriptionReminderLog(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     stage = Column(String(50), nullable=False, index=True)
-    sent_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    sent_at = Column(DateTime, default=datetime.now, nullable=False)
 
     # Relationships
     tenant = relationship("Tenant", back_populates="reminder_logs")
@@ -64,8 +64,8 @@ class TenantRegistrationCode(Base):
     used_count = Column(Integer, default=0, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     expires_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
 
     # Relationships
     tenant = relationship("Tenant", back_populates="registration_codes")

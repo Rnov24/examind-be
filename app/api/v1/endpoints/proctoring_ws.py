@@ -199,7 +199,7 @@ async def ws_companion(websocket: WebSocket, session_id: int, token: str = Query
                 await websocket.send_text(json.dumps({
                     "event": "pong",
                     "sent_at": msg.get("sent_at"),
-                    "server_time": datetime.utcnow().isoformat(),
+                    "server_time": datetime.now().isoformat(),
                 }))
 
             # 1. Edge CV snapshot preview frame for teacher monitor
@@ -224,7 +224,7 @@ async def ws_companion(websocket: WebSocket, session_id: int, token: str = Query
                 if snapshot_base64:
                     snapshot_url = save_snapshot_base64(session_id, snapshot_base64)
 
-                now = datetime.utcnow()
+                now = datetime.now()
                 db = SessionLocal()
                 log = ProctoringLog(
                     session_id=session_id,

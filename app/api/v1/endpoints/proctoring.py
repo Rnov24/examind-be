@@ -47,7 +47,7 @@ async def log_proctoring_event(
     if request.snapshot_base64:
         snapshot_url = save_snapshot_base64(session.id, request.snapshot_base64)
 
-    now = datetime.utcnow()
+    now = datetime.now()
     log = ProctoringLog(
         session_id=session.id,
         event_type=request.event_type,
@@ -203,7 +203,7 @@ async def send_teacher_warning(
             "teacher_name": current_user.full_name,
             "message_text": request.message_text,
             "urgency": request.urgency,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now().isoformat(),
         },
     }
     await ws_hub.send_to_student(session.id, warning_payload)
@@ -261,7 +261,7 @@ async def tolerate_session_incidents(
             "camera_source": "human_supervisor",
             "severity": "low",
             "duration_seconds": 0,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now().isoformat(),
             "snapshot_url": None,
             "current_integrity_score": session.integrity_score,
             "status": session.status,
@@ -289,7 +289,7 @@ async def deliberate_teacher_disqualify(
     # may adjudicate this session.
     session = require_session(db, current_user, request.session_id)
 
-    now = datetime.utcnow()
+    now = datetime.now()
     session.status = "aborted"
     session.total_score = 0.00
     session.integrity_score = 0

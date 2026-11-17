@@ -19,4 +19,4 @@ class PricingPlan(Base):
     features = Column(JSON, nullable=True)  # list[str]
     is_popular = Column(Boolean, default=False, nullable=False, index=True)
     sort_order = Column(Integer, nullable=False, default=0)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)

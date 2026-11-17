@@ -19,7 +19,7 @@ def save_snapshot_base64(session_id: int, base64_str: str) -> str:
             base64_str = base64_str.split(",", 1)[1]
 
         image_data = base64.b64decode(base64_str)
-        filename = f"{session_id}_{uuid.uuid4().hex[:8]}_{int(datetime.utcnow().timestamp())}.jpg"
+        filename = f"{session_id}_{uuid.uuid4().hex[:8]}_{int(datetime.now().timestamp())}.jpg"
         filepath = os.path.join(UPLOAD_DIR, filename)
 
         with open(filepath, "wb") as f:

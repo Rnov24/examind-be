@@ -22,7 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3.4",
-    "pytest-asyncio>=0.25.0",
+    "pytest-asyncio>=1.5.0",
     "ruff>=0.9.0",
 ]
 
@@ -38,3 +38,9 @@ ignore = []
 minversion = "7.0"
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Pins today's behavior (loop scope follows each fixture's own scope).
+# "fixture-scope" exists only in pytest-asyncio >= 1.5.0 — see the
+# pytest-asyncio>=1.5.0 floor in dependencies; 1.4.x rejects it at
+# configure time. The suite has no async fixtures, so this only
+# silences the unset-scope deprecation warning.
+asyncio_default_fixture_loop_scope = "fixture-scope"

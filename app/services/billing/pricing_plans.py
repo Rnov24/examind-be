@@ -135,7 +135,7 @@ def update_pricing_plan(db: Session, plan_id: str, fields: dict) -> Optional[dic
     for key in EDITABLE_FIELDS:
         if key in fields:
             setattr(plan, key, fields[key])
-    plan.updated_at = datetime.utcnow()
+    plan.updated_at = datetime.now()
 
     db.commit()
     db.refresh(plan)

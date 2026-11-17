@@ -31,7 +31,7 @@ async def check_and_send_reminders(
       - Recipient: primary admin user of the tenant.
       - Log-only on individual email failure (does not crash overall loop).
     """
-    now = as_of or datetime.utcnow()
+    now = as_of or datetime.now()
     logger.info(f"[SubscriptionReminders] Running reminder check as of {now.isoformat()}...")
 
     # Fetch active or pending tenants with configured due date
@@ -216,7 +216,7 @@ def backfill_existing_tenants(db: Session, overwrite: bool = False) -> int:
 
     tenants = query.all()
     count = 0
-    now = datetime.utcnow()
+    now = datetime.now()
 
     for t in tenants:
         base_time = t.created_at or now

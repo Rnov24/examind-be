@@ -49,7 +49,7 @@ def db_session():
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
 
-    now = datetime.utcnow()
+    now = datetime.now()
     db.add_all([
         Tenant(id=1, name="Sekolah A", code="SCH-A"),
         _user(4, "TCH-A", "guru-a@sch-a.id", "teacher", 1, "Guru A"),
@@ -166,7 +166,7 @@ def test_non_live_remaining_uses_begun_at_then_clamps(client, db_session):
     session = db_session.query(ExamSession).filter(
         ExamSession.exam_id == 3, ExamSession.student_id == 7
     ).first()
-    now = datetime.utcnow()
+    now = datetime.now()
     session.begun_at = now - timedelta(minutes=50)
     exam = db_session.query(Exam).filter(Exam.id == 3).first()
     exam.end_time = now + timedelta(minutes=5)
@@ -181,7 +181,7 @@ def test_non_live_remaining_uses_begun_at_then_clamps(client, db_session):
 # --- Create / update validation ----------------------------------------------
 
 def test_non_live_create_rejects_duration_longer_than_window(client):
-    now = datetime.utcnow()
+    now = datetime.now()
     resp = client.post(
         "/api/v1/exams",
         headers=_auth(4),
@@ -199,7 +199,7 @@ def test_non_live_create_rejects_duration_longer_than_window(client):
 
 
 def test_create_defaults_to_live_and_returns_mode(client):
-    now = datetime.utcnow()
+    now = datetime.now()
     resp = client.post(
         "/api/v1/exams",
         headers=_auth(4),
@@ -216,7 +216,7 @@ def test_create_defaults_to_live_and_returns_mode(client):
 
 
 def test_update_can_switch_mode_and_validates_window(client):
-    now = datetime.utcnow()
+    now = datetime.now()
     # Switch exam 3 (non-live, 60-min duration, 3h window) to live: fine.
     resp = client.put("/api/v1/exams/3", headers=_auth(4), json={"exam_mode": "live"})
     assert resp.status_code == 200

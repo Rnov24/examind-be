@@ -12,7 +12,7 @@ class QuestionBank(Base):
     title = Column(String(200), nullable=False)
     subject = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     # Relationships
     teacher = relationship("User", back_populates="question_banks")
@@ -36,7 +36,7 @@ class Question(Base):
     explanation = Column(Text, nullable=True)
     difficulty = Column(Enum("easy", "medium", "hard", name="difficulty_levels"), default="medium")
     default_points = Column(Numeric(5, 2), default=10.00)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     # Relationships
     bank = relationship("QuestionBank", back_populates="questions")

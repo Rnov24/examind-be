@@ -267,8 +267,8 @@ def grading_db():
         class_id=1,
         title="Ujian Akhir Semester Fisika",
         duration_minutes=60,
-        start_time=datetime.utcnow(),
-        end_time=datetime.utcnow() + timedelta(hours=2),
+        start_time=datetime.now(),
+        end_time=datetime.now() + timedelta(hours=2),
         status="published",
     )
     session.add(exam)
@@ -301,8 +301,8 @@ def grading_db():
         exam_id=10,
         student_id=2,
         status="submitted",
-        start_time=datetime.utcnow() - timedelta(minutes=45),
-        submit_time=datetime.utcnow(),
+        start_time=datetime.now() - timedelta(minutes=45),
+        submit_time=datetime.now(),
     )
     session.add(exam_session)
 

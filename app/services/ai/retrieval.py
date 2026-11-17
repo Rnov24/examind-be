@@ -131,7 +131,7 @@ def build_scoped_user_context(user: User, db: Session, query: Optional[str] = No
 
         # 3. Upcoming or Active Exams for Student's Classes (NO ANSWER KEYS LEAKED)
         if class_ids:
-            now = datetime.utcnow()
+            now = datetime.now()
             upcoming_exams = (
                 db.query(Exam)
                 .filter(
@@ -313,7 +313,7 @@ def build_scoped_user_context(user: User, db: Session, query: Optional[str] = No
         lines.append("")
 
         # 4. Subscription Due Dates (next 14 days)
-        now = datetime.utcnow()
+        now = datetime.now()
         fourteen_days_later = now + timedelta(days=14)
         due_tenants = []
         for t in all_tenants:
@@ -534,7 +534,7 @@ def build_scoped_user_context(user: User, db: Session, query: Optional[str] = No
 
             # Proctoring aggregates (last 7 days, scoped to this tenant's students)
             # Bucket counts via SQL aggregation; session sets passed as subqueries.
-            now = datetime.utcnow()
+            now = datetime.now()
             seven_days_ago = now - timedelta(days=7)
             recent_filter = (
                 ExamSession.student_id.in_(student_ids_subq),

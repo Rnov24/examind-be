@@ -211,7 +211,7 @@ def test_finance_analytics_null_created_at_handled_honestly(db_session, mock_sup
     )
     db_session.add(t)
     db_session.commit()
-    # Explicitly clear created_at since default=datetime.utcnow populates it on insert
+    # Explicitly clear created_at since default=datetime.now populates it on insert
     db_session.execute(text("UPDATE tenants SET created_at = NULL WHERE id = 10"))
     db_session.commit()
     db_session.expire_all()

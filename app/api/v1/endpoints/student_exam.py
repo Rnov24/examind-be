@@ -48,7 +48,7 @@ def _remaining_seconds(exam: Exam, session: Optional[ExamSession]) -> int:
     time past end_time, and a non-live student running into the window close
     is cut off at end_time.
     """
-    now = datetime.utcnow()
+    now = datetime.now()
     if session is not None and session.begun_at:
         elapsed = int((now - session.begun_at).total_seconds())
         remaining = exam.duration_minutes * 60 - elapsed
@@ -88,7 +88,7 @@ def _require_window_open(exam: Exam) -> None:
     with a 0-second clock. end_time is a hard cap for BOTH modes (live and
     non_live) — a student still inside the window is unaffected.
     """
-    if datetime.utcnow() > exam.end_time:
+    if datetime.now() > exam.end_time:
         raise AppException(
             message=(
                 "Jendela pengerjaan ujian sudah ditutup "
@@ -338,7 +338,7 @@ def begin_exam(
     # 0-second clock) once the window has closed.
     _require_window_open(exam)
     if session.begun_at is None:
-        session.begun_at = datetime.utcnow()
+        session.begun_at = datetime.now()
         db.commit()
         db.refresh(session)
     remaining = _remaining_seconds(exam, session)
@@ -385,7 +385,7 @@ def autosave_answers(
         .filter(AutosaveSnapshot.session_id == session.id)
         .first()
     )
-    now = datetime.utcnow()
+    now = datetime.now()
     if snapshot:
         snapshot.answers_payload = payload
         snapshot.last_saved_at = now
@@ -449,7 +449,7 @@ def submit_exam(
         submitted_answers=submitted_answers,
     )
 
-    now = datetime.utcnow()
+    now = datetime.now()
     session.submit_time = now
     session.status = "grading_in_progress"
     session.total_score = mcq_score
@@ -486,7 +486,7 @@ async def fail_exam_session(
             error_code="SESSION_NOT_FOUND",
         )
 
-    now = datetime.utcnow()
+    now = datetime.now()
 
     if session.status == "aborted":
         return ApiResponse.ok(
