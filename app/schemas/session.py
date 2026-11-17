@@ -98,3 +98,21 @@ class StudentExamResultResponse(BaseModel):
     integrity_score: int
     explanation_policy: str
     answers: List[StudentAnswerDetail] = []
+
+
+class StudentSessionHistoryItem(BaseModel):
+    """One row of the student's own exam-session history (GET /student/sessions).
+
+    ``submitted_at`` is the model's ``submit_time`` (NULL while the exam
+    is still running); ``total_score`` is NULL only if the row was never
+    scored. No answer data lives here — the per-exam result page owns that.
+    """
+    session_id: int
+    exam_id: int
+    exam_title: str
+    class_name: str
+    status: str
+    total_score: Optional[float] = None
+    integrity_score: Optional[int] = None
+    submitted_at: Optional[datetime] = None
+    begun_at: Optional[datetime] = None

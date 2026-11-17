@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, Request, BackgroundTasks, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload, selectinload
 from app.core.database import get_db
 from app.core.exceptions import AppException
@@ -22,6 +23,7 @@ from app.schemas.session import (
     AbortExamResponse,
     StudentExamResultResponse,
     StudentAnswerDetail,
+    StudentSessionHistoryItem,
 )
 from app.schemas.exam import ExamResponse
 from app.api.v1.endpoints.exams import build_exam_response
@@ -122,6 +124,47 @@ def get_student_active_exams(
     results = [build_exam_response(e) for e in exams]
 
     return ApiResponse.ok(data=results, message="Daftar ujian aktif berhasil dimuat")
+
+
+@router.get("/sessions", response_model=ApiResponse[List[StudentSessionHistoryItem]])
+def get_student_sessions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_student),
+):
+    """The student's own exam-session history, newest first.
+
+    One row per session the student owns — submitted, graded,
+    grading_in_progress and aborted included, so a disqualified session
+    shows up with its honest ``aborted`` status. Never-started exams have
+    no session row and simply don't appear. The filter is strictly
+    ``student_id == current_user.id``: no other student's session can
+    ever be returned, whatever exam or class they share.
+    """
+    sessions = (
+        db.query(ExamSession)
+        .options(joinedload(ExamSession.exam).joinedload(Exam.class_))
+        .filter(ExamSession.student_id == current_user.id)
+        .order_by(func.coalesce(ExamSession.submit_time, ExamSession.start_time).desc())
+        .limit(100)
+        .all()
+    )
+
+    results = [
+        StudentSessionHistoryItem(
+            session_id=s.id,
+            exam_id=s.exam_id,
+            exam_title=s.exam.title if s.exam else "Ujian",
+            class_name=s.exam.class_.name if s.exam and s.exam.class_ else "Kelas",
+            status=s.status,
+            total_score=float(s.total_score) if s.total_score is not None else None,
+            integrity_score=s.integrity_score,
+            submitted_at=s.submit_time,
+            begun_at=s.begun_at,
+        )
+        for s in sessions
+    ]
+
+    return ApiResponse.ok(data=results, message="Riwayat ujian berhasil dimuat")
 
 
 @router.post("/exam/{exam_id}/start", response_model=ApiResponse[ExamStartResponse])
